@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Dynasty Warriors 5: Empires
+GenericName=Action Game
+Comment=Native PC port of Dynasty Warriors 5: Empires (Xbox 360)
+Exec=DW5E %f
+Icon=dw5e
+Categories=Game;ActionGame;
+Terminal=false
+StartupWMClass=DW5E

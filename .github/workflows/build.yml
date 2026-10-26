@@ -1,0 +1,140 @@
+name: build
+
+on:
+  push:
+    branches: [main, 'ci/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-room-check:
+    name: Clean-room verification
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify zero game data or proprietary assets tracked
+        run: |
+          bad=$(git ls-files | grep -iE '^(game|discs|ghidra|ghidra_iop)/|/output/|^app/generated/default/|\.(iso|xex|pe|bin|wmv)$' || true)
+          if [ -n "$bad" ]; then
+            echo "ERROR: Forbidden game-derived or disc files are tracked in git:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "Clean-room verification passed: zero game data in git."
+
+  linux:
+    name: Linux AppImage
+    needs: clean-room-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm lld cmake ninja-build python3 \
+            libsdl3-dev libvulkan-dev vulkan-tools \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libgl1-mesa-dev libasound2-dev libpulse-dev libwayland-dev libxkbcommon-dev
+
+      - name: Download AppImage packaging tools
+        run: |
+          mkdir -p ~/.local/opt/appimage-tools
+          curl -sLo ~/.local/opt/appimage-tools/linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -sLo ~/.local/opt/appimage-tools/appimagetool-x86_64.AppImage \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x ~/.local/opt/appimage-tools/*.AppImage
+
+      - name: Configure Linux setup wizard & tools
+        run: |
+          cmake -S app -B app/build-linux -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_TOOLCHAIN_FILE=tools/linux/clang.cmake
+
+      - name: Build setup wizard, tests & ReXGlue recompiler
+        run: |
+          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test rexglue -j$(nproc)
+
+      - name: Run unit tests
+        run: |
+          ctest --test-dir app/build-linux --output-on-failure
+
+      - name: Export relocatable Linux SDK
+        run: |
+          python3 tools/release/export_linux_sdk.py --output dist/sdk
+
+      - name: Package Linux AppImage
+        env:
+          DW5E_APPIMAGE_TOOLS: /home/runner/.local/opt/appimage-tools
+        run: |
+          python3 tools/release/make_release.py linux \
+            --build app/build-linux \
+            --linux-sdk dist/sdk
+
+      - name: Upload Linux AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DW5E-linux-x86_64
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.sha256
+
+  windows:
+    name: Windows Compiler Package
+    needs: clean-room-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build python3 curl p7zip-full
+
+      - name: Set up llvm-mingw host toolchain
+        run: |
+          TOOLCHAIN_ARCHIVE="llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64.tar.xz"
+          curl -sLo "/tmp/$TOOLCHAIN_ARCHIVE" \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/$TOOLCHAIN_ARCHIVE"
+          sudo mkdir -p /opt/llvm-mingw
+          sudo tar -xf "/tmp/$TOOLCHAIN_ARCHIVE" -C /opt/llvm-mingw --strip-components=1
+          echo "/opt/llvm-mingw/bin" >> $GITHUB_PATH
+
+      - name: Cache Windows toolchain downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/windows-build-tools
+          key: windows-build-tools-v1
+
+      - name: Configure Windows setup wizard
+        run: |
+          cmake -S app -B app/build-windows -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_TOOLCHAIN_FILE=tools/windows/llvm-mingw.cmake
+
+      - name: Build Windows setup wizard & ReXGlue recompiler
+        run: |
+          cmake --build app/build-windows --target dw5e_setup rexglue -j$(nproc)
+
+      - name: Package Windows compiler zip
+        run: |
+          python3 tools/release/make_release.py windows \
+            --build app/build-windows
+
+      - name: Upload Windows package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DW5E-windows-x64
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256

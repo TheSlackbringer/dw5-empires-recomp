@@ -34,6 +34,7 @@ tools/ghidra-ext/work/
 /build/
 /bin/
 /out/
+/dist/
 /app/build*/
 /app/out/
 /app/deps/

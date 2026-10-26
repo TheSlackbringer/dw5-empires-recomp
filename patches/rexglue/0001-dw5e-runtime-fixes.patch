@@ -1,3 +1,35 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9b3cdf5..9f2d95d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -223,9 +223,11 @@ configure_file(
+ )
+ 
+ # Output directories (multi-config appends /<Config>/ automatically)
+-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${REXGLUE_ROOT}/out/${REX_PLATFORM}")
+-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${REXGLUE_ROOT}/out/${REX_PLATFORM}")
+-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${REXGLUE_ROOT}/out/${REX_PLATFORM}")
++if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
++    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${REXGLUE_ROOT}/out/${REX_PLATFORM}")
++    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${REXGLUE_ROOT}/out/${REX_PLATFORM}")
++    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${REXGLUE_ROOT}/out/${REX_PLATFORM}")
++endif()
+ 
+ # Sanitizer support for debugging memory corruption and undefined behavior
+ if(REXGLUE_ENABLE_SANITIZERS)
+diff --git a/include/rex/chrono/chrono.h b/include/rex/chrono/chrono.h
+index d876846..23f1d23 100644
+--- a/include/rex/chrono/chrono.h
++++ b/include/rex/chrono/chrono.h
+@@ -116,7 +116,7 @@ using XSystemClock = detail::NtSystemClock<detail::Domain::Guest>;
+ 
+ namespace std::chrono {
+ 
+-#ifdef __APPLE__
++#if defined(__APPLE__) || defined(_LIBCPP_VERSION)
+ // Apple libc++ does not expose clock_time_conversion or clock_cast.
+ template <class, class>
+ struct clock_time_conversion {};
 diff --git a/include/rex/system/xevent.h b/include/rex/system/xevent.h
 index e81df52..6528aeb 100644
 --- a/include/rex/system/xevent.h
@@ -40,6 +72,32 @@ index 0a43f07..38683fa 100644
    virtual rex::thread::WaitHandle* GetWaitHandle() { return nullptr; }
  
    // Creates the kernel object for guest code to use. Typically not needed.
+diff --git a/include/rex/ui/d3d12/d3d12_api.h b/include/rex/ui/d3d12/d3d12_api.h
+index d0e7252..312092b 100644
+--- a/include/rex/ui/d3d12/d3d12_api.h
++++ b/include/rex/ui/d3d12/d3d12_api.h
+@@ -18,10 +18,19 @@
+ #ifndef NOMINMAX
+ #define NOMINMAX
+ #endif
+-#include <windows.h>
+-#include <ObjBase.h>
++#include <objbase.h>
+ 
++#if __has_include(<DXProgrammableCapture.h>)
+ #include <DXProgrammableCapture.h>
++#else
++interface DECLSPEC_UUID("9f251514-9d4d-4902-9d60-18988ab7d4b5") DECLSPEC_NOVTABLE IDXGraphicsAnalysis : public IUnknown {
++  virtual void STDMETHODCALLTYPE BeginCapture() = 0;
++  virtual void STDMETHODCALLTYPE EndCapture() = 0;
++};
++#ifdef __CRT_UUID_DECL
++__CRT_UUID_DECL(IDXGraphicsAnalysis, 0x9f251514, 0x9d4d, 0x4902, 0x9d, 0x60, 0x18, 0x98, 0x8a, 0xb7, 0xd4, 0xb5)
++#endif
++#endif
+ #include <d3d12.h>
+ #include <d3d12sdklayers.h>
+ #include <d3dcompiler.h>
 diff --git a/src/audio/xma_context.cpp b/src/audio/xma_context.cpp
 index 11b83be..70b8791 100644
 --- a/src/audio/xma_context.cpp
@@ -58,6 +116,70 @@ index 11b83be..70b8791 100644
        break;
      }
    }
+diff --git a/src/core/fiber_win32.cpp b/src/core/fiber_win32.cpp
+index 5744a90..60d02b6 100644
+--- a/src/core/fiber_win32.cpp
++++ b/src/core/fiber_win32.cpp
+@@ -11,7 +11,7 @@
+ 
+ #include <rex/platform.h>
+ #if REX_PLATFORM_WIN32
+-#include <Windows.h>
++#include <windows.h>
+ #include <rex/thread/fiber.h>
+ 
+ #include <cassert>
+diff --git a/src/core/platform_win.h b/src/core/platform_win.h
+index 22d6566..e39ff02 100644
+--- a/src/core/platform_win.h
++++ b/src/core/platform_win.h
+@@ -24,8 +24,8 @@
+ #include <windows.h>
+ #include <windowsx.h>
+ 
+-#include <ObjBase.h>
+-#include <SDKDDKVer.h>
++#include <objbase.h>
++#include <sdkddkver.h>
+ #include <bcrypt.h>
+ #include <dwmapi.h>
+ #include <shellapi.h>
+diff --git a/src/core/socket_win.cpp b/src/core/socket_win.cpp
+index 87f1960..65c2d86 100644
+--- a/src/core/socket_win.cpp
++++ b/src/core/socket_win.cpp
+@@ -5,7 +5,7 @@ static_assert(REX_PLATFORM_WIN32, "This file is Windows-only");
+ 
+ #include "platform_win.h"
+ 
+-#include <WinSock2.h>
++#include <winsock2.h>
+ 
+ namespace rex::net {
+ 
+diff --git a/src/input/xinput/xinput_input_driver.cpp b/src/input/xinput/xinput_input_driver.cpp
+index a6a1da9..45c242a 100644
+--- a/src/input/xinput/xinput_input_driver.cpp
++++ b/src/input/xinput/xinput_input_driver.cpp
+@@ -115,12 +115,12 @@ X_STATUS XinputInputDriver::Setup() {
+   }
+ 
+   module_ = module;
+-  XInputGetCapabilities_ = xigc;
+-  XInputGetState_ = xigs;
+-  XInputGetStateEx_ = xigsEx;
+-  XInputGetKeystroke_ = xigk;
+-  XInputSetState_ = xiss;
+-  XInputEnable_ = xie;
++  XInputGetCapabilities_ = reinterpret_cast<void*>(xigc);
++  XInputGetState_ = reinterpret_cast<void*>(xigs);
++  XInputGetStateEx_ = reinterpret_cast<void*>(xigsEx);
++  XInputGetKeystroke_ = reinterpret_cast<void*>(xigk);
++  XInputSetState_ = reinterpret_cast<void*>(xiss);
++  XInputEnable_ = reinterpret_cast<void*>(xie);
+ 
+   return X_STATUS_SUCCESS;
+ }
 diff --git a/src/system/function_dispatcher.cpp b/src/system/function_dispatcher.cpp
 index bd43109..80aa758 100644
 --- a/src/system/function_dispatcher.cpp
@@ -246,3 +368,63 @@ index d358f39..0743cfc 100644
  
      // TODO(benvanik): assert nothing has been changed in the struct.
      return object;
+diff --git a/src/system/xsocket.cpp b/src/system/xsocket.cpp
+index 2d13ac8..f75f55a 100644
+--- a/src/system/xsocket.cpp
++++ b/src/system/xsocket.cpp
+@@ -21,9 +21,8 @@
+ 
+ // Standard socket types used by Xbox API emulation
+ #if REX_PLATFORM_WIN32
+-#include <WinSock2.h>
+-
+-#include <WS2tcpip.h>
++#include <winsock2.h>
++#include <ws2tcpip.h>
+ #else
+ #include <arpa/inet.h>
+ #include <netinet/in.h>
+diff --git a/src/ui/d3d12/d3d12_provider.cpp b/src/ui/d3d12/d3d12_provider.cpp
+index bf8252b..5684023 100644
+--- a/src/ui/d3d12/d3d12_provider.cpp
++++ b/src/ui/d3d12/d3d12_provider.cpp
+@@ -256,7 +256,7 @@ bool D3D12Provider::Initialize() {
+   while (dxgi_factory->EnumAdapters1(adapter_index, &adapter) == S_OK) {
+     DXGI_ADAPTER_DESC1 adapter_desc;
+     if (SUCCEEDED(adapter->GetDesc1(&adapter_desc))) {
+-      if (SUCCEEDED(pfn_d3d12_create_device_(adapter, D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device),
++      if (SUCCEEDED(pfn_d3d12_create_device_(adapter, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device),
+                                              nullptr))) {
+         if (REXCVAR_GET(d3d12_adapter) >= 0) {
+           if (adapter_index == REXCVAR_GET(d3d12_adapter)) {
+diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
+index f102b56..fd6b6b8 100644
+--- a/thirdparty/CMakeLists.txt
++++ b/thirdparty/CMakeLists.txt
+@@ -64,7 +64,7 @@ if(REXGLUE_BUILD_TESTS)
+ endif()
+ 
+ foreach(submodule ${REQUIRED_SUBMODULES})
+-    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${submodule}/.git")
++    if(NOT IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${submodule}")
+         message(FATAL_ERROR
+             "Git submodule '${submodule}' is not initialized.\n"
+             "Please run: git submodule update --init --recursive\n"
+diff --git a/thirdparty/FFmpeg/libavutil/internal.h b/libavutil/internal.h
+index 2ed1c2a..3cbe0ec 100644
+--- a/thirdparty/FFmpeg/libavutil/internal.h
++++ b/thirdparty/FFmpeg/libavutil/internal.h
+@@ -178,11 +178,13 @@ void avpriv_request_sample(void *avc,
+                            const char *msg, ...) av_printf_format(2, 3);
+ 
+ #if HAVE_LIBC_MSVCRT
++#if defined(_MSC_VER)
+ #include <crtversion.h>
+ #if defined(_VC_CRT_MAJOR_VERSION) && _VC_CRT_MAJOR_VERSION < 14
+ #pragma comment(linker, "/include:" EXTERN_PREFIX "avpriv_strtod")
+ #pragma comment(linker, "/include:" EXTERN_PREFIX "avpriv_snprintf")
+ #endif
++#endif
+ 
+ #define avpriv_open ff_open
+ #define avpriv_tempfile ff_tempfile

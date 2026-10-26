@@ -54,14 +54,43 @@ elseif(REXGLUE_RECOMP_DEBUG_INFO STREQUAL "line-tables-only")
 endif()
 
 # Include entrypoint generated code if codegen has been run.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/sources.cmake")
-    include(generated/default/sources.cmake)
-    set(REXGLUE_ENTRYPOINT_GENERATED_SOURCES ${GENERATED_SOURCES})
-    set(REXGLUE_ENTRYPOINT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/generated/default")
+if(DW5E_GENERATED_DIR)
+    set(REXGLUE_ENTRYPOINT_INCLUDE_DIR "${DW5E_GENERATED_DIR}/default")
+    if(EXISTS "${REXGLUE_ENTRYPOINT_INCLUDE_DIR}/sources.cmake")
+        include("${REXGLUE_ENTRYPOINT_INCLUDE_DIR}/sources.cmake")
+        set(REXGLUE_ENTRYPOINT_GENERATED_SOURCES ${GENERATED_SOURCES})
+        set_source_files_properties(${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
+            PROPERTIES COMPILE_OPTIONS "${REXGLUE_RECOMP_OPTIONS}")
+    endif()
+    add_custom_target(dw5e_codegen)
+else()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/sources.cmake")
+        include(generated/default/sources.cmake)
+        set(REXGLUE_ENTRYPOINT_GENERATED_SOURCES ${GENERATED_SOURCES})
+        set(REXGLUE_ENTRYPOINT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/generated/default")
 
-    # Carried on the sources so they hold for whichever target compiles them.
-    set_source_files_properties(${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
-        PROPERTIES COMPILE_OPTIONS "${REXGLUE_RECOMP_OPTIONS}")
+        # Carried on the sources so they hold for whichever target compiles them.
+        set_source_files_properties(${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
+            PROPERTIES COMPILE_OPTIONS "${REXGLUE_RECOMP_OPTIONS}")
+    endif()
+
+    # Codegen runs as part of the build, re-running only when an input in codegen.d
+    # changes. Build it alone with 'cmake --build . --target dw5e_codegen'.
+    # Listing the sources as outputs orders any target that compiles them after
+    # codegen, including one a project assembles itself rather than taking the
+    # library rexglue_setup_target() builds. The stamp comes first: the DEPFILE
+    # names it.
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/codegen.build.stamp"
+               ${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
+        COMMAND $<TARGET_FILE:rex::rexglue> codegen ${CMAKE_CURRENT_SOURCE_DIR}/dw5e_manifest.toml
+        DEPFILE "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/codegen.d"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating recompiled code for dw5e"
+        VERBATIM
+    )
+    add_custom_target(dw5e_codegen
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/codegen.build.stamp")
 endif()
 
 # The options go on the target as well: CMake compiles the header from its own
@@ -84,6 +113,11 @@ macro(rexglue_setup_target target_name)
             ${CMAKE_CURRENT_SOURCE_DIR}/src
             ${REXGLUE_ENTRYPOINT_INCLUDE_DIR}
         )
+        if(DW5E_GENERATED_DIR)
+            target_include_directories(${target_name}_recomp PRIVATE
+                "${DW5E_GENERATED_DIR}/.."
+            )
+        endif()
         target_link_libraries(${target_name}_recomp PRIVATE rex::runtime)
         rexglue_apply_target_settings(${target_name}_recomp)
         rexglue_apply_recomp_settings(${target_name}_recomp
@@ -99,6 +133,11 @@ macro(rexglue_setup_target target_name)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${REXGLUE_ENTRYPOINT_INCLUDE_DIR}
     )
+    if(DW5E_GENERATED_DIR)
+        target_include_directories(${target_name} PRIVATE
+            "${DW5E_GENERATED_DIR}/.."
+        )
+    endif()
     target_link_libraries(${target_name} PRIVATE rex::runtime)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/metadata/icons")
         rexglue_embed_metadata(${target_name}
@@ -108,25 +147,7 @@ macro(rexglue_setup_target target_name)
     rexglue_configure_target(${target_name} ${ARGN})
 endmacro()
 
-# Codegen runs as part of the build, re-running only when an input in codegen.d
-# changes. Build it alone with 'cmake --build . --target dw5e_codegen'.
-# Listing the sources as outputs orders any target that compiles them after
-# codegen, including one a project assembles itself rather than taking the
-# library rexglue_setup_target() builds. The stamp comes first: the DEPFILE
-# names it.
-add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/codegen.build.stamp"
-           ${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
-    COMMAND $<TARGET_FILE:rex::rexglue> codegen ${CMAKE_CURRENT_SOURCE_DIR}/dw5e_manifest.toml
-    DEPFILE "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/codegen.d"
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Generating recompiled code for dw5e"
-    VERBATIM
-)
-add_custom_target(dw5e_codegen
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/codegen.build.stamp")
-
 # Include DLL module shared library targets if codegen has generated them
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/dll_targets.cmake")
-    include(generated/default/dll_targets.cmake)
+if(EXISTS "${REXGLUE_ENTRYPOINT_INCLUDE_DIR}/dll_targets.cmake")
+    include("${REXGLUE_ENTRYPOINT_INCLUDE_DIR}/dll_targets.cmake")
 endif()

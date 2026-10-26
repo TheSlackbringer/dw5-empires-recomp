@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141E30" />
+      <stop offset="100%" stop-color="#243B55" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE000" />
+      <stop offset="100%" stop-color="#799F0C" />
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#bg)" />
+  <circle cx="128" cy="128" r="90" fill="none" stroke="#E2B007" stroke-width="6" opacity="0.4" />
+  <path d="M70 80 L186 80 L140 130 L186 180 L70 180 L116 130 Z" fill="url(#gold)" />
+  <text x="128" y="222" font-family="sans-serif" font-size="22" font-weight="bold" fill="#FFFFFF" text-anchor="middle" letter-spacing="2">EMPIRES</text>
+</svg>
