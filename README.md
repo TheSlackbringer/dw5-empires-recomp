@@ -5,16 +5,16 @@
 <p align="center">
   <a href="https://github.com/TheSlackbringer/dw5-empires-recomp/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/github/actions/workflow/status/TheSlackbringer/dw5-empires-recomp/build.yml?branch=main&label=build&logo=github"></a>
   <img alt="platform: Windows | Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%2F%20Steam%20Deck-0a7bbb">
-  <img alt="graphics: Vulkan" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
+  <img alt="graphics: D3D12 | Vulkan" src="https://img.shields.io/badge/graphics-D3D12%20%7C%20Vulkan-ac162c">
   <a href="LICENSE"><img alt="license: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-6a9a1f"></a>
   <img alt="status: playable" src="https://img.shields.io/badge/status-playable-brightgreen">
   <img alt="disc: PAL 4B4F07D3" src="https://img.shields.io/badge/disc-PAL%204B4F07D3-555">
 </p>
 
-A native PC port of **Dynasty Warriors 5: Empires** (Xbox 360 PAL, Title ID `4B4F07D3`) created through static recompilation using **ReXGlue**. The game's PowerPC Xenon machine code is translated ahead-of-time into native C++ and compiled for modern x86-64 PCs. Graphics run natively over **Vulkan** using the `xenos` GPU backend.
+A native PC port of **Dynasty Warriors 5: Empires** (Xbox 360 PAL, Title ID `4B4F07D3`) created through static recompilation using **ReXGlue**. The game's PowerPC Xenon machine code is translated ahead-of-time into native C++ and compiled for modern x86-64 PCs. Graphics run natively using **Direct3D 12** on Windows and **Vulkan** on Linux via the `xenos` GPU plugin.
 
 ### Key Features
-- **Native Performance:** 60 FPS gameplay, native resolution scaling, widescreen support, and near-instant load times with zero emulation overhead.
+- **Native Performance:** Native resolution scaling, widescreen support, and near-instant load times with zero emulation overhead.
 - **Modernized Camera:** Custom dual-stick camera hook supporting analog right-stick orbit (yaw and pitch) around your officer.
 - **Audio & Video:** Full BGM, voice lines, sound effects, and WMV movie playback.
 - **Zero-Friction Release Builder:** Offline compiler toolchains bundled into the release package (Windows zip and Linux AppImage) so you don't need to install Git, Python, or Visual Studio.
@@ -69,7 +69,7 @@ For developers modifying runtime code, hooks, or recompiler profiles.
 - Linux (x86_64, SSSE3+) or Windows (MSYS2 / llvm-mingw)
 - CMake 3.25+
 - Clang / Clang++ (LLVM 18+) & Ninja
-- Vulkan SDK and compatible GPU drivers
+- Direct3D 12 capable GPU (Windows) or Vulkan SDK and compatible drivers (Linux)
 - SDL3 development libraries
 
 ### Setup & Build
