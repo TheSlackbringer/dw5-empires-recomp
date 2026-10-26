@@ -39,11 +39,8 @@ jobs:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Fetch ReXGlue SDK (pinned) with runtime patches
+      - name: Apply ReXGlue runtime patches
         run: |
-          git clone -q https://github.com/rexglue/rexglue-sdk.git rexglue-sdk
-          git -C rexglue-sdk checkout -q c94f5ebdcb3c9d1a460ca48e04f9758448f8d518
-          git -C rexglue-sdk submodule update --init --recursive
           git -C rexglue-sdk apply "$GITHUB_WORKSPACE/patches/rexglue/0001-dw5e-runtime-fixes.patch"
 
       - name: Test draft release lifecycle
@@ -115,11 +112,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build python3 curl p7zip-full
 
-      - name: Fetch ReXGlue SDK (pinned) with runtime patches
+      - name: Apply ReXGlue runtime patches
         run: |
-          git clone -q https://github.com/rexglue/rexglue-sdk.git rexglue-sdk
-          git -C rexglue-sdk checkout -q c94f5ebdcb3c9d1a460ca48e04f9758448f8d518
-          git -C rexglue-sdk submodule update --init --recursive
           git -C rexglue-sdk apply "$GITHUB_WORKSPACE/patches/rexglue/0001-dw5e-runtime-fixes.patch"
 
       - name: Set up llvm-mingw host toolchain

@@ -38,7 +38,6 @@ tools/ghidra-ext/work/
 /app/build*/
 /app/out/
 /app/deps/
-/rexglue-sdk/
 *.exe
 *.dll
 *.so
