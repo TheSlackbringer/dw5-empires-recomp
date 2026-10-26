@@ -1,0 +1,34 @@
+# Code missing from .pdata (found by codegen UnresolvedCall, verified by disassembly)
+[functions]
+# shared vector->int tail body; six stubs at 0x82119738..0x82119794 set r6/r7 and branch here
+"0x821196C8" = { size = 0x6C }
+# C++ this-adjust thunk: addi r3,r3,4 ; b <target>
+"0x822F0A48" = { size = 0x8 }
+
+# Missing from .pdata, called through vtables/function tables (tools/find_missing_funcs.py,
+# filtered to addresses outside every .pdata function; labels inside functions are SEH funclets)
+"0x822E63B0" = {}
+"0x822E72C0" = {}
+"0x822EAD60" = {}
+"0x822F0488" = {}
+"0x822F04A8" = {}
+"0x822F0538" = {}
+"0x822F16B0" = {}
+"0x822F16B8" = {}
+"0x822F16E0" = {}
+"0x822F16F0" = {}
+"0x822F16F8" = {}
+"0x822F1700" = {}
+"0x822F1710" = {}
+"0x824251D8" = {}
+"0x82425370" = {}
+"0x824281A0" = {}
+"0x82428338" = {}
+"0x82428340" = {}
+
+# Missing from .pdata, address built in code (lis/addi) and stored as a callback; codegen folded
+# them into the preceding jump-table dispatcher / thunk (tools: scratch codeptrs scan, 2026-10-12).
+# 0x8213D118 crashed in battle (run13: unit callback at unit+280, called from 0x8217D5C8).
+"0x8213D118" = { size = 0x10 }   # unit callback, tail into 0x8213D128 / 0x8217EBC8
+"0x8213D608" = { size = 0x10 }   # unit callback twin, tail into 0x8213D618 / 0x8217EBC8
+"0x8231E208" = { size = 0x10 }   # virtual-call thunk (vtable slot 34), passed as callback

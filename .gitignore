@@ -1,0 +1,75 @@
+# =============================================================================
+# Game data: discs, ISOs, decrypted executables, and extracted assets (Never commit!)
+# =============================================================================
+/game/
+/discs/
+*.iso
+*.xex
+*.pe
+*.bin
+*.idx
+*.wmv
+*.sfd
+*.afs
+
+# =============================================================================
+# Ghidra databases (derived from game binaries)
+# =============================================================================
+/ghidra/
+/ghidra_iop/
+tools/ghidra-ext/work/
+
+# =============================================================================
+# Recompiler generated code (derived from default.xex)
+# Regenerated via CMake / 'rexglue codegen app/dw5e_manifest.toml'
+# =============================================================================
+/app/generated/default/
+/recomp/**/output/
+/recomp/*/vu1/
+/recomp/*/vu0/
+
+# =============================================================================
+# Build outputs, artifacts and caches
+# =============================================================================
+/build/
+/bin/
+/out/
+/app/build*/
+/app/out/
+/app/deps/
+/rexglue-sdk/
+*.exe
+*.dll
+*.so
+*.dylib
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.a
+*.o
+*.obj
+
+# =============================================================================
+# Runtime logs, traces, profiles and memory snapshots
+# =============================================================================
+*.log
+*.log.*
+/logs/
+*.counts
+*.counts.*
+*.phase
+*.gdb.out
+run*.txt
+/notes/snapshots/
+*.bak*
+imgui.ini
+
+# =============================================================================
+# Python & IDE caches
+# =============================================================================
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+CMakeUserPresets.json

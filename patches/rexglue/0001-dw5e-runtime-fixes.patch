@@ -1,0 +1,248 @@
+diff --git a/include/rex/system/xevent.h b/include/rex/system/xevent.h
+index e81df52..6528aeb 100644
+--- a/include/rex/system/xevent.h
++++ b/include/rex/system/xevent.h
+@@ -1,4 +1,6 @@
+ #pragma once
++
++#include <mutex>
+ /**
+  ******************************************************************************
+  * Xenia : Xbox 360 Emulator Research Project                                 *
+@@ -44,10 +46,16 @@ class XEvent : public XObject {
+ 
+  protected:
+   rex::thread::WaitHandle* GetWaitHandle() override { return event_.get(); }
++  void WaitCallback() override;
++  void SyncFromGuest() override;
+ 
+  private:
+   bool manual_reset_ = false;
+   std::unique_ptr<rex::thread::Event> event_;
++
++  // Mirror of the guest KEVENT signal_state, kept in step with the host event.
++  std::mutex state_lock_;
++  bool host_signaled_ = false;
+ };
+ 
+ }  // namespace rex::system
+diff --git a/include/rex/system/xobject.h b/include/rex/system/xobject.h
+index 0a43f07..38683fa 100644
+--- a/include/rex/system/xobject.h
++++ b/include/rex/system/xobject.h
+@@ -209,6 +209,9 @@ class XObject {
+ 
+   // Called on successful wait.
+   virtual void WaitCallback() {}
++  // dw5e-port: ported from xenia-canary dcf2994 (2026-09-13): re-read state the guest wrote
++  // straight into its dispatch header (e.g. SignalState = 0 as an inline reset).
++  virtual void SyncFromGuest() {}
+   virtual rex::thread::WaitHandle* GetWaitHandle() { return nullptr; }
+ 
+   // Creates the kernel object for guest code to use. Typically not needed.
+diff --git a/src/audio/xma_context.cpp b/src/audio/xma_context.cpp
+index 11b83be..70b8791 100644
+--- a/src/audio/xma_context.cpp
++++ b/src/audio/xma_context.cpp
+@@ -136,7 +136,12 @@ bool XmaContext::Work() {
+     Decode(&data);
+     Consume(&output_rb, &data);
+ 
+-    if (!data.IsAnyInputBufferValid() || data.error_status == 4) {
++    // dw5e-port: ported from xenia-canary 6bef1fb (2026-08-25). Don't abandon a
++    // partially consumed frame: Consume() hands over at most subframe_decode_count
++    // blocks per pass, so the pass that exhausts the input strands the rest of the
++    // frame, and a game polling for it never kicks the context again.
++    if ((!data.IsAnyInputBufferValid() || data.error_status == 4) &&
++        current_frame_remaining_subframes_ == 0) {
+       break;
+     }
+   }
+diff --git a/src/system/function_dispatcher.cpp b/src/system/function_dispatcher.cpp
+index bd43109..80aa758 100644
+--- a/src/system/function_dispatcher.cpp
++++ b/src/system/function_dispatcher.cpp
+@@ -13,6 +13,7 @@
+  *              role as a function dispatch table rather than a CPU emulator.
+  */
+ 
++#include <string>
+ #include <rex/assert.h>
+ #include <rex/dbg.h>
+ #include <rex/logging.h>
+@@ -23,6 +24,11 @@
+ #include <rex/system/function_dispatcher.h>
+ #include <rex/system/thread_state.h>
+ 
++#if defined(__linux__)
++#include <sys/uio.h>
++#include <unistd.h>
++#endif
++
+ namespace rex::runtime {
+ 
+ namespace {
+@@ -34,7 +40,50 @@ FunctionDispatcher* GetBoundFunctionDispatcher() {
+ 
+ }  // namespace
+ 
+-static void InvalidFunctionTrap(PPCContext& ctx, uint8_t* /*base*/) {
++static void InvalidFunctionTrap(PPCContext& ctx, uint8_t* base) {
++  // dw5e-port: log the caller and a guest stack walk before dying.
++  REXLOG_ERROR("Invalid call target 0x{:08X}: lr=0x{:08X} ctr=0x{:08X} r1=0x{:08X} r3=0x{:08X} "
++               "r4=0x{:08X} r12=0x{:08X}",
++               ctx.last_indirect_target, static_cast<uint32_t>(ctx.lr), ctx.ctr.u32, ctx.r1.u32,
++               ctx.r3.u32, ctx.r4.u32, ctx.r12.u32);
++  if (base) {
++    // Fault-free read: process_vm_readv returns an error on unmapped memory instead of
++    // raising a signal (a plain load past the stack top loops in the guest AV handler).
++    auto load = [base](uint32_t addr, uint32_t& out) -> bool {
++#if defined(__linux__)
++      uint32_t raw = 0;
++      iovec local{&raw, sizeof(raw)};
++      iovec remote{base + addr, sizeof(raw)};
++      if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != sizeof(raw)) return false;
++      out = __builtin_bswap32(raw);
++      return true;
++#else
++      (void)addr; (void)out;
++      return false;
++#endif
++    };
++    // Object/vtable at a virtual call site: lwz r11,0(r31) ; lwz r10,N(r11) ; mtctr ; bctrl
++    REXLOG_ERROR("  r11(vtable?)=0x{:08X} r31(this?)=0x{:08X}", ctx.r11.u32, ctx.r31.u32);
++    for (uint32_t obj : {ctx.r31.u32, ctx.r3.u32}) {
++      uint32_t vt = 0;
++      if (!obj || !load(obj, vt)) continue;
++      std::string line;
++      for (uint32_t i = 0; i < 20; ++i) {
++        uint32_t e = 0;
++        line += load(vt + i * 4, e) ? fmt::format(" {:08X}", e) : std::string(" ????????");
++      }
++      REXLOG_ERROR("  obj 0x{:08X} vtable 0x{:08X}:{}", obj, vt, line);
++    }
++    uint32_t sp = ctx.r1.u32;
++    for (int depth = 0; depth < 16 && sp >= 0x40000000 && sp < 0x80000000; ++depth) {
++      uint32_t back_chain = 0, saved_lr = 0;
++      if (!load(sp, back_chain)) break;
++      if (back_chain <= sp || back_chain >= 0x80000000) break;
++      if (!load(back_chain - 8, saved_lr)) break;  // callers do "mflr r12; stw r12,-8(r1)"
++      REXLOG_ERROR("  frame {:2}: sp=0x{:08X} return=0x{:08X}", depth, back_chain, saved_lr);
++      sp = back_chain;
++    }
++  }
+   REX_FATAL("Call to invalid or unregistered function at guest address 0x{:08X}",
+             ctx.last_indirect_target);
+ }
+diff --git a/src/system/xevent.cpp b/src/system/xevent.cpp
+index c24fbd1..c4a61f9 100644
+--- a/src/system/xevent.cpp
++++ b/src/system/xevent.cpp
+@@ -22,7 +22,14 @@ XEvent::~XEvent() = default;
+ void XEvent::Initialize(bool manual_reset, bool initial_state) {
+   assert_false(event_);
+ 
++  manual_reset_ = manual_reset;
+   this->CreateNative<X_KEVENT>();
++  // dw5e-port: ported from xenia-canary dcf2994 (2026-09-13): keep the guest header truthful.
++  // Don't touch wait_list: SetNativePointer stashes the handle there.
++  auto* kevent = guest_object<X_KEVENT>();
++  kevent->header.type = manual_reset ? 0x00 : 0x01;
++  kevent->header.signal_state = initial_state ? 1 : 0;
++  host_signaled_ = initial_state;
+ 
+   if (manual_reset) {
+     event_ = rex::thread::Event::CreateManualResetEvent(initial_state);
+@@ -48,12 +55,15 @@ void XEvent::InitializeNative(void* native_ptr, X_DISPATCH_HEADER* header) {
+   }
+ 
+   bool initial_state = header->signal_state ? true : false;
++  host_signaled_ = initial_state;
+   if (manual_reset_) {
+     event_ = rex::thread::Event::CreateManualResetEvent(initial_state);
+   } else {
+     event_ = rex::thread::Event::CreateAutoResetEvent(initial_state);
+   }
+   assert_not_null(event_);
++  // Track the guest header so Set/Reset/SyncFromGuest can reach it.
++  SetNativePointer(memory()->HostToGuestVirtual(native_ptr), true);
+ }
+ 
+ void XEvent::Query(uint32_t* out_type, uint32_t* out_state) {
+@@ -74,20 +84,59 @@ void XEvent::Query(uint32_t* out_type, uint32_t* out_state) {
+ }
+ 
+ int32_t XEvent::Set(uint32_t priority_increment, bool wait) {
++  std::lock_guard<std::mutex> lock(state_lock_);
++  guest_object<X_KEVENT>()->header.signal_state = 1;
++  host_signaled_ = true;
+   event_->Set();
+   return 1;
+ }
+ 
+ int32_t XEvent::Pulse(uint32_t priority_increment, bool wait) {
++  std::lock_guard<std::mutex> lock(state_lock_);
++  auto* kevent = guest_object<X_KEVENT>();
++  // KePulseEvent returns the pre-pulse signal state.
++  const int32_t old_signal_state = kevent->header.signal_state;
+   event_->Pulse();
+-  return 1;
++  // Pulse leaves the event reset after releasing waiters.
++  kevent->header.signal_state = 0;
++  host_signaled_ = false;
++  return old_signal_state;
+ }
+ 
+ int32_t XEvent::Reset() {
++  std::lock_guard<std::mutex> lock(state_lock_);
++  guest_object<X_KEVENT>()->header.signal_state = 0;
++  host_signaled_ = false;
+   event_->Reset();
+   return 1;
+ }
+ 
++void XEvent::WaitCallback() {
++  // Auto-reset events clear on a successful wait; manual-reset events stay set.
++  if (!manual_reset_) {
++    std::lock_guard<std::mutex> lock(state_lock_);
++    guest_object<X_KEVENT>()->header.signal_state = 0;
++    host_signaled_ = false;
++  }
++}
++
++void XEvent::SyncFromGuest() {
++  if (!guest_object()) {
++    return;
++  }
++  std::lock_guard<std::mutex> lock(state_lock_);
++  bool guest_signaled = guest_object<X_KEVENT>()->header.signal_state ? true : false;
++  if (guest_signaled == host_signaled_) {
++    return;
++  }
++  host_signaled_ = guest_signaled;
++  if (guest_signaled) {
++    event_->Set();
++  } else {
++    event_->Reset();
++  }
++}
++
+ void XEvent::Clear() {
+   event_->Reset();
+ }
+diff --git a/src/system/xobject.cpp b/src/system/xobject.cpp
+index d358f39..0743cfc 100644
+--- a/src/system/xobject.cpp
++++ b/src/system/xobject.cpp
+@@ -393,6 +393,11 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state, void* na
+     // TODO: assert if the type of the object != as_type
+     uint32_t handle = header->wait_list_blink;
+     auto object = kernel_state->object_table()->LookupObject<XObject>(handle);
++    if (object) {
++      // dw5e-port: ported from xenia-canary dcf2994 (2026-09-13): the only place the guest hands
++      // us a raw dispatch header, so the only place a direct write to it can be picked up.
++      object->SyncFromGuest();
++    }
+ 
+     // TODO(benvanik): assert nothing has been changed in the struct.
+     return object;

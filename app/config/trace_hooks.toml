@@ -1,0 +1,39 @@
+# Temporary tracing of the WMV/XMEDIA player object lifecycle (use-after-free investigation).
+# Remove from manifest includes once the crash is understood.
+
+[[midasm_hook]]   # constructor 0x822E31F8 stores the derived vtable 0x82092C90
+address = 0x822E3220
+name = "dw5e_trace_ctor"
+registers = ["r30"]
+after_instruction = true
+
+[[midasm_hook]]   # derived destructor 0x822E3320, before "mr r30,r3"
+address = 0x822E3330
+name = "dw5e_trace_dtor"
+registers = ["r3"]
+
+[[midasm_hook]]   # Release (vtable slot 2), function entry
+address = 0x822E5560
+name = "dw5e_trace_release"
+registers = ["r3"]
+
+[[midasm_hook]]   # AddRef (vtable slot 1, shared by many classes), function entry
+address = 0x82475FC8
+name = "dw5e_trace_addref"
+registers = ["r3"]
+
+[[midasm_hook]]   # player callback 0x822C2718 (signals the worker event)
+address = 0x822C2718
+name = "dw5e_trace_callback"
+registers = ["r3"]
+
+[[midasm_hook]]   # worker woke on event 1, about to call 0x822E0E20(obj)
+address = 0x822C2784
+name = "dw5e_trace_worker"
+registers = ["r3"]
+
+[[midasm_hook]]   # creator stored the new object in global+28; r3 = obj after this load
+address = 0x822C26B8
+name = "dw5e_trace_created"
+registers = ["r3"]
+after_instruction = true

@@ -1,0 +1,16 @@
+# Right-stick camera (Phase 4). See src/dw5e_camera.cpp and notes/PHASE2.md "Camera hunt".
+
+[[midasm_hook]]   # battle follow-camera tick 0x822AE118(viewIdx, focus*, ?, mode), function entry
+address = 0x822AE118
+name = "dw5e_camera_tick_begin"
+registers = ["r3", "r4"]
+
+[[midasm_hook]]   # same tick, after 0x822AC7A8 returned (before the epilogue)
+address = 0x822AE1F8
+name = "dw5e_camera_tick_end"
+registers = ["r3"]
+
+[[midasm_hook]]   # other camera tick 0x822AE258 -> 0x822AC120 (eye snap, likely L1 reset), entry
+address = 0x822AE258
+name = "dw5e_camera_snap_begin"
+registers = ["r3"]

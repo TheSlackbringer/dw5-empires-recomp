@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Blocks committing game assets, discs, generated C++, Ghidra DBs, or memory snapshots.
+pattern='(^|/)(game/|ghidra/|app/generated/default/|notes/snapshots/)|.*\.(iso|xex|pe|wmv)$'
+bad=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "$pattern")
+if [ -n "$bad" ]; then
+    echo "Commit blocked: game data or game-derived files must never be committed:" >&2
+    echo "$bad" >&2
+    exit 1
+fi
+
+# Guard against accidental commits of files > 50MB
+max_size=52428800
+for file in $(git diff --cached --name-only --diff-filter=ACMR); do
+    if [ -f "$file" ]; then
+        size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+        if [ "$size" -gt "$max_size" ]; then
+            echo "Commit blocked: $file is larger than 50MB ($size bytes)." >&2
+            exit 1
+        fi
+    fi
+done
+
+exit 0
