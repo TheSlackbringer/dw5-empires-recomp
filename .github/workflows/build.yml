@@ -3,6 +3,7 @@ name: build
 on:
   push:
     branches: [main, 'ci/**']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -29,34 +30,40 @@ jobs:
     name: Linux AppImage
     needs: clean-room-check
     runs-on: ubuntu-24.04
+    container: archlinux:latest
     steps:
+      - name: Install system dependencies
+        run: |
+          pacman -Sy --noconfirm archlinux-keyring
+          pacman -Syu --noconfirm --needed git clang lld llvm cmake ninja pkgconf python \
+            libx11 libxrandr libxinerama libxcursor libxi xorgproto mesa libglvnd alsa-lib libpulse \
+            wayland libxkbcommon vulkan-headers curl file
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang llvm lld cmake ninja-build python3 \
-            libsdl3-dev libvulkan-dev vulkan-tools \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libgl1-mesa-dev libasound2-dev libpulse-dev libwayland-dev libxkbcommon-dev
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Test draft release lifecycle
+        run: python3 -m unittest discover -s tools/release -p 'test_*.py' -v
 
       - name: Download AppImage packaging tools
         run: |
-          mkdir -p ~/.local/opt/appimage-tools
-          curl -sLo ~/.local/opt/appimage-tools/linuxdeploy-x86_64.AppImage \
+          mkdir -p /opt/appimage-tools
+          curl -sLo /opt/appimage-tools/linuxdeploy-x86_64.AppImage \
             https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -sLo ~/.local/opt/appimage-tools/appimagetool-x86_64.AppImage \
+          curl -sLo /opt/appimage-tools/appimagetool-x86_64.AppImage \
             https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x ~/.local/opt/appimage-tools/*.AppImage
+          chmod +x /opt/appimage-tools/*.AppImage
 
       - name: Configure Linux setup wizard & tools
         run: |
-          cmake -S app -B app/build-linux -G Ninja \
+          CC=clang CXX=clang++ cmake -S app -B app/build-linux -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_TOOLCHAIN_FILE=tools/linux/clang.cmake
+            -DREXSDK_DIR=$PWD/rexglue-sdk \
+            -DDW5E_BUILD_GAME=OFF
 
       - name: Build setup wizard, tests & ReXGlue recompiler
         run: |
@@ -72,11 +79,12 @@ jobs:
 
       - name: Package Linux AppImage
         env:
-          DW5E_APPIMAGE_TOOLS: /home/runner/.local/opt/appimage-tools
+          APPIMAGE_EXTRACT_AND_RUN: '1'
         run: |
           python3 tools/release/make_release.py linux \
             --build app/build-linux \
-            --linux-sdk dist/sdk
+            --linux-sdk dist/sdk \
+            --appimage-tools /opt/appimage-tools
 
       - name: Upload Linux AppImage artifact
         uses: actions/upload-artifact@v4
@@ -90,43 +98,69 @@ jobs:
     name: Windows Compiler Package
     needs: clean-room-check
     runs-on: ubuntu-24.04
+    container: archlinux:latest
     steps:
+      - name: Install cross-compilation tools
+        run: |
+          pacman -Sy --noconfirm archlinux-keyring
+          pacman -Syu --noconfirm --needed git cmake ninja python curl unzip xz make diffutils gcc file
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install cross-compilation tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build python3 curl p7zip-full
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up llvm-mingw host toolchain
         run: |
           TOOLCHAIN_ARCHIVE="llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64.tar.xz"
-          curl -sLo "/tmp/$TOOLCHAIN_ARCHIVE" \
+          curl -sSfL -o "/tmp/$TOOLCHAIN_ARCHIVE" \
             "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/$TOOLCHAIN_ARCHIVE"
-          sudo mkdir -p /opt/llvm-mingw
-          sudo tar -xf "/tmp/$TOOLCHAIN_ARCHIVE" -C /opt/llvm-mingw --strip-components=1
+          mkdir -p /opt/llvm-mingw
+          tar -xf "/tmp/$TOOLCHAIN_ARCHIVE" -C /opt/llvm-mingw --strip-components=1
           echo "/opt/llvm-mingw/bin" >> $GITHUB_PATH
+          echo "LLVM_MINGW_ROOT=/opt/llvm-mingw" >> $GITHUB_ENV
 
       - name: Cache Windows toolchain downloads
         uses: actions/cache@v4
+        id: win-tools-cache
         with:
-          path: ~/.local/opt/windows-build-tools
-          key: windows-build-tools-v1
+          path: /opt/windows-builder-tools
+          key: windows-builder-tools-20261006
+
+      - name: Download Windows offline builder tools
+        if: steps.win-tools-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /opt/windows-builder-tools
+          curl -sSfL -o /opt/windows-builder-tools/llvm-mingw-20261006-ucrt-x86_64.zip \
+            https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-x86_64.zip
+          curl -sSfL -o /opt/windows-builder-tools/cmake-4.4.4-windows-x86_64.zip \
+            https://github.com/Kitware/CMake/releases/download/v4.4.4/cmake-4.4.4-windows-x86_64.zip
+          curl -sSfL -o /opt/windows-builder-tools/ninja-win.zip \
+            https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip
+          printf '%s  %s\n' \
+            "317492c456aa27ee607a5919f1d2d38dcdc1112516a24d0bf4b00d078f52d17a" /opt/windows-builder-tools/llvm-mingw-20261006-ucrt-x86_64.zip \
+            "bace36e94b31c68ab6fa295f26dfa11219e0701cf7c94b0284a7d1cb13dac536" /opt/windows-builder-tools/cmake-4.4.4-windows-x86_64.zip \
+            "07fc8261b42b20e71d1720b39068c2e14ffcee6396b76fb7a795fb460b78dc65" /opt/windows-builder-tools/ninja-win.zip | sha256sum -c -
 
       - name: Configure Windows setup wizard
         run: |
           cmake -S app -B app/build-windows -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_TOOLCHAIN_FILE=tools/windows/llvm-mingw.cmake
+            -DCMAKE_TOOLCHAIN_FILE=tools/windows/llvm-mingw.cmake \
+            -DLLVM_MINGW_ROOT=/opt/llvm-mingw \
+            -DREXSDK_DIR=$PWD/rexglue-sdk \
+            -DDW5E_BUILD_GAME=OFF
 
       - name: Build Windows setup wizard & ReXGlue recompiler
         run: |
           cmake --build app/build-windows --target dw5e_setup rexglue -j$(nproc)
 
       - name: Package Windows compiler zip
+        env:
+          DW5E_WIN_TOOLS: /opt/windows-builder-tools
+          LLVM_MINGW_ROOT: /opt/llvm-mingw
         run: |
           python3 tools/release/make_release.py windows \
             --build app/build-windows
@@ -138,3 +172,34 @@ jobs:
           path: |
             dist/*.zip
             dist/*.zip.sha256
+
+  draft:
+    name: Update Draft Release
+    needs: [clean-room-check, linux, windows]
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: draft-release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Windows package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: DW5E-windows-x64
+          path: dist
+      - name: Download Linux package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: DW5E-linux-x86_64
+          path: dist
+      - name: Update the numbered draft (never publishes)
+        run: |
+          python3 tools/release/update_draft.py
