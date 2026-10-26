@@ -142,7 +142,7 @@ jobs:
         run: |
           cmake -S app -B app/build-windows -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_TOOLCHAIN_FILE=tools/windows/llvm-mingw.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=$PWD/tools/windows/llvm-mingw.cmake \
             -DLLVM_MINGW_ROOT=/opt/llvm-mingw \
             -DREXSDK_DIR=$PWD/rexglue-sdk \
             -DDW5E_BUILD_GAME=OFF
