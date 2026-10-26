@@ -14,10 +14,11 @@
 A native PC port of **Dynasty Warriors 5: Empires** (Xbox 360 PAL, Title ID `4B4F07D3`) created through static recompilation using **ReXGlue**. The game's PowerPC Xenon machine code is translated ahead-of-time into native C++ and compiled for modern x86-64 PCs. Graphics run natively using **Direct3D 12** on Windows and **Vulkan** on Linux via the `xenos` GPU plugin.
 
 ### Key Features
-- **Resolution Scaling:** Internal draw resolution scaling via the ReXGlue GPU backend to render at higher resolutions with near-instant load times and zero emulation overhead.
 - **Modernized Camera:** Custom dual-stick camera hook supporting analog right-stick orbit (yaw and pitch) around your officer.
 - **Audio & Video:** Full BGM, voice lines, sound effects, and WMV movie playback.
+- **Near-Instant Load Times:** Direct native execution with zero emulation overhead.
 - **Zero-Friction Release Builder:** Offline compiler toolchains bundled into the release package (Windows zip and Linux AppImage) so you don't need to install Git, Python, or Visual Studio.
+- **Resolution Scaling (WIP):** Internal draw resolution scaling via the GPU backend is in development for release packages.
 
 > [!IMPORTANT]
 > You must provide your own legally dumped retail disc of **Dynasty Warriors 5: Empires** (Xbox 360 Europe/PAL, Title ID `4B4F07D3`, SHA-1: `82fc63021a0919d8b97584682babf0654997c0a9`).
