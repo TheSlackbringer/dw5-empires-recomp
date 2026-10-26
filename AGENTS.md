@@ -12,7 +12,7 @@ Look-ups (repo map, camera architecture, Ghidra, pitfalls): "Reference" at the e
 
 ---
 
-## Hard rules (2026-10-19 — from dw5-ps2 lineage)
+## Hard rules (2026-10-19)
 - **Never change a test's pass criteria** (thresholds, tick windows, run mode) to make it pass. Changing criteria is
   a spec change: the user approves it first. A failing test is reported as failing.
 - **No timing workarounds:** no delays, sleeps or knobs tuned to one game routine or one machine. Fix the root cause.
@@ -143,7 +143,7 @@ cd app/out/build/linux-amd64-relwithdebinfo
   - `config/trace_hooks.toml` — midasm trace hooks for subsystem debugging.
   - `dw5e_manifest.toml` — ReXGlue project manifest (game root, entrypoint `default.xex`, output dir `generated/default`).
   - `generated/rexglue.cmake` — CMake SDK integration and codegen target definitions.
-- `patches/rexglue/` — patch series against ReXGlue SDK v0.10.0 (`c94f5eb`) (following the `Gears3-Azura` and `dw5-ps2` patch-management pattern):
+- `patches/rexglue/` — patch series against ReXGlue SDK v0.10.0 (`c94f5eb`) (following the `Gears3-Azura` patch-management pattern):
   - `0001-dw5e-runtime-fixes.patch`:
     1. `src/system/function_dispatcher.cpp`: invalid-call trap with fault-free guest stack walk (`process_vm_readv`) and vtable dump.
     2. `src/audio/xma_context.cpp`: XMA frame drain fix (prevents audio starvation / stall).
