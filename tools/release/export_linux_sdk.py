@@ -64,10 +64,14 @@ def export_sdk(output, cxx=None):
 
     # Copy Clang resource dir
     clang_bin = Path(programs['clang'])
-    llvm_dir = clang_bin.parent.parent
-    clang_lib = llvm_dir / 'lib/clang'
-    if clang_lib.exists():
-        shutil.copytree(clang_lib, output / 'lib/clang', dirs_exist_ok=True)
+    llvm_candidates = [
+        Path('/usr/lib/llvm-23/lib/clang'),
+        clang_bin.parent.parent / 'lib/clang',
+        Path('/usr/lib/clang'),
+    ]
+    clang_lib = next((p for p in llvm_candidates if p.exists() and p.is_dir()), None)
+    if clang_lib:
+        shutil.copytree(clang_lib, output / 'lib/clang', dirs_exist_ok=True, symlinks=True)
 
     # Copy CMake modules
     for cmake_share in Path('/usr/share').glob('cmake*'):
@@ -80,6 +84,10 @@ def export_sdk(output, cxx=None):
         for lib in cxx.glob('**/lib/libc++*'):
             if lib.is_file():
                 copy_file(lib, output / 'lib' / lib.name)
+        for lib in cxx.glob('**/lib/libunwind*'):
+            if lib.is_file():
+                copy_file(lib, output / 'lib' / lib.name)
+
 
     bin_dir = output / 'bin'
     bin_dir.mkdir(exist_ok=True)

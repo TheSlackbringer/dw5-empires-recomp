@@ -30,15 +30,8 @@ jobs:
     name: Linux AppImage
     needs: clean-room-check
     runs-on: ubuntu-24.04
-    container: archlinux:latest
+    container: ghcr.io/theslackbringer/dw5xl-release-linux@sha256:e8acf93dc99a7c16e906ccf916e40a338e2b890fc1a5280caf2e333a8f441149
     steps:
-      - name: Install system dependencies
-        run: |
-          pacman -Sy --noconfirm archlinux-keyring
-          pacman -Syu --noconfirm --needed git clang lld llvm cmake ninja pkgconf python \
-            libx11 libxrandr libxinerama libxcursor libxi xorgproto mesa libglvnd alsa-lib libpulse \
-            wayland libxkbcommon vulkan-headers curl file
-
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -46,22 +39,26 @@ jobs:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Fetch ReXGlue SDK (pinned) with runtime patches
+        run: |
+          git clone -q https://github.com/rexglue/rexglue-sdk.git rexglue-sdk
+          git -C rexglue-sdk checkout -q c94f5ebdcb3c9d1a460ca48e04f9758448f8d518
+          git -C rexglue-sdk submodule update --init --recursive
+          git -C rexglue-sdk apply "$GITHUB_WORKSPACE/patches/rexglue/0001-dw5e-runtime-fixes.patch"
+
       - name: Test draft release lifecycle
         run: python3 -m unittest discover -s tools/release -p 'test_*.py' -v
 
-      - name: Download AppImage packaging tools
+      - name: Extract approved libc++ packages
         run: |
-          mkdir -p /opt/appimage-tools
-          curl -sLo /opt/appimage-tools/linuxdeploy-x86_64.AppImage \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -sLo /opt/appimage-tools/appimagetool-x86_64.AppImage \
-            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x /opt/appimage-tools/*.AppImage
+          mkdir -p /tmp/cxx
+          for deb in /approved-debs/*.deb; do dpkg-deb -x "$deb" /tmp/cxx; done
 
       - name: Configure Linux setup wizard & tools
         run: |
-          CC=clang CXX=clang++ cmake -S app -B app/build-linux -G Ninja \
+          CC=clang-23 CXX=clang++-23 cmake -S app -B app/build-linux -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
             -DREXSDK_DIR=$PWD/rexglue-sdk \
             -DDW5E_BUILD_GAME=OFF
 
@@ -75,7 +72,16 @@ jobs:
 
       - name: Export relocatable Linux SDK
         run: |
-          python3 tools/release/export_linux_sdk.py --output dist/sdk
+          python3 tools/release/export_linux_sdk.py --output dist/sdk --cxx /tmp/cxx
+
+      - name: Download AppImage packaging tools
+        run: |
+          mkdir -p /opt/appimage-tools
+          curl -sLo /opt/appimage-tools/linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -sLo /opt/appimage-tools/appimagetool-x86_64.AppImage \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /opt/appimage-tools/*.AppImage
 
       - name: Package Linux AppImage
         env:
@@ -98,27 +104,31 @@ jobs:
     name: Windows Compiler Package
     needs: clean-room-check
     runs-on: ubuntu-24.04
-    container: archlinux:latest
     steps:
-      - name: Install cross-compilation tools
-        run: |
-          pacman -Sy --noconfirm archlinux-keyring
-          pacman -Syu --noconfirm --needed git cmake ninja python curl unzip xz make diffutils gcc file
-
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Configure git safe directory
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install cross-compilation host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build python3 curl p7zip-full
+
+      - name: Fetch ReXGlue SDK (pinned) with runtime patches
+        run: |
+          git clone -q https://github.com/rexglue/rexglue-sdk.git rexglue-sdk
+          git -C rexglue-sdk checkout -q c94f5ebdcb3c9d1a460ca48e04f9758448f8d518
+          git -C rexglue-sdk submodule update --init --recursive
+          git -C rexglue-sdk apply "$GITHUB_WORKSPACE/patches/rexglue/0001-dw5e-runtime-fixes.patch"
 
       - name: Set up llvm-mingw host toolchain
         run: |
           TOOLCHAIN_ARCHIVE="llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64.tar.xz"
           curl -sSfL -o "/tmp/$TOOLCHAIN_ARCHIVE" \
             "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/$TOOLCHAIN_ARCHIVE"
-          mkdir -p /opt/llvm-mingw
-          tar -xf "/tmp/$TOOLCHAIN_ARCHIVE" -C /opt/llvm-mingw --strip-components=1
+          sudo mkdir -p /opt/llvm-mingw
+          sudo tar -xf "/tmp/$TOOLCHAIN_ARCHIVE" -C /opt/llvm-mingw --strip-components=1
           echo "/opt/llvm-mingw/bin" >> $GITHUB_PATH
           echo "LLVM_MINGW_ROOT=/opt/llvm-mingw" >> $GITHUB_ENV
 
@@ -127,18 +137,19 @@ jobs:
         id: win-tools-cache
         with:
           path: /opt/windows-builder-tools
-          key: windows-builder-tools-20261006
+          key: windows-builder-tools-20261006-v2
 
       - name: Download Windows offline builder tools
         if: steps.win-tools-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p /opt/windows-builder-tools
+          sudo mkdir -p /opt/windows-builder-tools
+          sudo chown -R $USER /opt/windows-builder-tools
           curl -sSfL -o /opt/windows-builder-tools/llvm-mingw-20261006-ucrt-x86_64.zip \
             https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-x86_64.zip
           curl -sSfL -o /opt/windows-builder-tools/cmake-4.4.4-windows-x86_64.zip \
             https://github.com/Kitware/CMake/releases/download/v4.4.4/cmake-4.4.4-windows-x86_64.zip
           curl -sSfL -o /opt/windows-builder-tools/ninja-win.zip \
-            https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip
+            https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-win.zip
           printf '%s  %s\n' \
             "317492c456aa27ee607a5919f1d2d38dcdc1112516a24d0bf4b00d078f52d17a" /opt/windows-builder-tools/llvm-mingw-20261006-ucrt-x86_64.zip \
             "bace36e94b31c68ab6fa295f26dfa11219e0701cf7c94b0284a7d1cb13dac536" /opt/windows-builder-tools/cmake-4.4.4-windows-x86_64.zip \

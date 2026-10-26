@@ -89,6 +89,9 @@ if(DW5E_BUILD_SETUP)
         ${CMAKE_CURRENT_SOURCE_DIR}/../rexglue-sdk/thirdparty/sdl3/include
     )
 
+    find_package(Threads REQUIRED)
+    target_link_libraries(dw5e_setup PRIVATE Threads::Threads)
+
     if(TARGET imgui)
         target_link_libraries(dw5e_setup PRIVATE imgui)
         target_include_directories(dw5e_setup PRIVATE
@@ -116,9 +119,12 @@ add_executable(dw5e_setup_test
     setup/build_game.cpp
     setup/run_process.cpp
 )
+find_package(Threads REQUIRED)
+target_link_libraries(dw5e_setup_test PRIVATE Threads::Threads)
 target_include_directories(dw5e_setup_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/setup
 )
 add_test(NAME setup_unit_tests COMMAND dw5e_setup_test)
+
 
