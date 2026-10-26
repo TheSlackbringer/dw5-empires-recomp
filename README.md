@@ -7,7 +7,7 @@
   <img alt="platform: Windows | Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%2F%20Steam%20Deck-0a7bbb">
   <img alt="graphics: D3D12 | Vulkan" src="https://img.shields.io/badge/graphics-D3D12%20%7C%20Vulkan-ac162c">
   <a href="LICENSE"><img alt="license: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-6a9a1f"></a>
-  <img alt="status: playable" src="https://img.shields.io/badge/status-playable-brightgreen">
+  <img alt="status: in progress" src="https://img.shields.io/badge/status-in--progress-e6a200">
   <img alt="disc: PAL 4B4F07D3" src="https://img.shields.io/badge/disc-PAL%204B4F07D3-555">
 </p>
 
