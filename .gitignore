@@ -38,8 +38,12 @@ tools/ghidra-ext/work/
 /app/build*/
 /app/out/
 /app/deps/
+/rexglue-sdk/build/
+/rexglue-sdk/out/
 *.exe
 *.dll
+!/rexglue-sdk/tools/binutils/*.exe
+!/rexglue-sdk/tools/binutils/*.dll
 *.so
 *.dylib
 *.pdb

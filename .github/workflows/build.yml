@@ -33,29 +33,24 @@ jobs:
     container: ghcr.io/theslackbringer/dw5xl-release-linux@sha256:e8acf93dc99a7c16e906ccf916e40a338e2b890fc1a5280caf2e333a8f441149
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Apply ReXGlue runtime patches
-        run: |
-          git -C rexglue-sdk apply "$GITHUB_WORKSPACE/patches/rexglue/0001-dw5e-runtime-fixes.patch"
-
       - name: Test draft release lifecycle
         run: python3 -m unittest discover -s tools/release -p 'test_*.py' -v
 
-      - name: Extract approved libc++ packages
+      - name: Install approved libc++ packages
         run: |
+          dpkg -i /approved-debs/*.deb
           mkdir -p /tmp/cxx
           for deb in /approved-debs/*.deb; do dpkg-deb -x "$deb" /tmp/cxx; done
 
       - name: Configure Linux setup wizard & tools
         run: |
-          CC=clang-23 CXX=clang++-23 cmake -S app -B app/build-linux -G Ninja \
+          CC=clang-23 CXX=clang++-23 CXXFLAGS="-stdlib=libc++" cmake -S app -B app/build-linux -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld -stdlib=libc++" \
             -DREXSDK_DIR=$PWD/rexglue-sdk \
             -DDW5E_BUILD_GAME=OFF
 
@@ -103,18 +98,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Install cross-compilation host tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build python3 curl p7zip-full
-
-      - name: Apply ReXGlue runtime patches
-        run: |
-          git -C rexglue-sdk apply "$GITHUB_WORKSPACE/patches/rexglue/0001-dw5e-runtime-fixes.patch"
 
       - name: Set up llvm-mingw host toolchain
         run: |
