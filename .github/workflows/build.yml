@@ -90,7 +90,7 @@ jobs:
 
       - name: Verify actual AppImage contents and native offline tools
         run: |
-          sha256sum -c dist/*.AppImage.sha256
+          (cd dist && sha256sum -c *.AppImage.sha256)
           set -- dist/*.AppImage
           [ "$#" -eq 1 ]
           image="$(realpath "$1")"
