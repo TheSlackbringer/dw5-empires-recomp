@@ -60,7 +60,7 @@ jobs:
 
       - name: Build setup wizard, tests & ReXGlue recompiler
         run: |
-          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test rexgpu-xenos rexglue -j$(nproc)
+          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test rexgpu-xenos rexglue -j$(nproc)
 
       - name: Run unit tests
         run: |
@@ -165,7 +165,7 @@ jobs:
 
       - name: Build Windows setup wizard & ReXGlue recompiler
         run: |
-          cmake --build app/build-windows --target dw5e_dxc_uuid_test dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test rexgpu-xenos rexglue -j$(nproc)
+          cmake --build app/build-windows --target dw5e_dxc_uuid_test dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test rexgpu-xenos rexglue -j$(nproc)
 
       - name: Package Windows compiler zip
         env:
@@ -193,7 +193,9 @@ jobs:
             app/build-windows/dw5e_safe_read_test.exe
             app/build-windows/dw5e_dxc_uuid_test.exe
             app/build-windows/dw5e_kernel_export_test.exe
+            app/build-windows/dw5e_gpu_plugin_test.exe
             app/build-windows/rexglue-sdk/src/system/*.dll
+            app/build-windows/rexglue-sdk/src/graphics/*.dll
             app/build-windows/rexglue-sdk/thirdparty/*.dll
           if-no-files-found: error
 
@@ -241,6 +243,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'DXC interface UUID tests failed' }
           & (Join-Path $package[0].FullName 'dw5e_kernel_export_test.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Kernel wrapper export link tests failed' }
+          & (Join-Path $package[0].FullName 'dw5e_gpu_plugin_test.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Real GPU plugin load tests failed' }
 
 
   draft:

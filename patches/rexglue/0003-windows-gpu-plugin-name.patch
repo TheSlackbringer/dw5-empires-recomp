@@ -1,0 +1,18 @@
+diff --git a/src/graphics/CMakeLists.txt b/src/graphics/CMakeLists.txt
+index 0d8f8af0..596129f4 100644
+--- a/src/graphics/CMakeLists.txt
++++ b/src/graphics/CMakeLists.txt
+@@ -105,6 +105,12 @@ set_target_properties(rexgpu-xenos PROPERTIES
+     VISIBILITY_INLINES_HIDDEN ON
+ )
+-
++
++if(WIN32)
++    # The Windows runtime loader expects rexgpu-<name><config>.dll.
++    # MinGW otherwise adds a lib prefix that prevents runtime discovery.
++    set_target_properties(rexgpu-xenos PROPERTIES PREFIX "")
++endif()
++
+ target_include_directories(rexgpu-xenos PRIVATE
+     ${REXGLUE_ROOT}/thirdparty/renderdoc
+     ${REXGLUE_ROOT}  # For thirdparty/dxbc/DXBCChecksum.h include

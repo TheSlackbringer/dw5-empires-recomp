@@ -158,3 +158,21 @@ endif()
 add_executable(dw5e_kernel_export_test tests/kernel_export_test.cpp)
 target_link_libraries(dw5e_kernel_export_test PRIVATE rex::runtime)
 add_test(NAME kernel_export_link_tests COMMAND dw5e_kernel_export_test)
+
+# Load the real runtime plugin, rather than only proving it compiles/links.
+add_executable(dw5e_gpu_plugin_test tests/gpu_plugin_test.cpp)
+target_link_libraries(dw5e_gpu_plugin_test PRIVATE rex::runtime)
+rexglue_apply_target_settings(dw5e_gpu_plugin_test)
+add_dependencies(dw5e_gpu_plugin_test rexgpu-xenos)
+add_custom_command(TARGET dw5e_gpu_plugin_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:rexgpu-xenos>
+        $<TARGET_FILE_DIR:dw5e_gpu_plugin_test>
+    VERBATIM)
+if(WIN32)
+    add_custom_command(TARGET dw5e_gpu_plugin_test POST_BUILD
+        COMMAND "$<$<BOOL:$<TARGET_RUNTIME_DLLS:dw5e_gpu_plugin_test>>:${CMAKE_COMMAND};-E;copy_if_different;$<TARGET_RUNTIME_DLLS:dw5e_gpu_plugin_test>;$<TARGET_FILE_DIR:dw5e_gpu_plugin_test>>"
+        COMMAND_EXPAND_LISTS
+        VERBATIM)
+endif()
+add_test(NAME gpu_plugin_load_tests COMMAND dw5e_gpu_plugin_test)
