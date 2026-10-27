@@ -26,9 +26,9 @@ bool syncDirectory(const fs::path &source, const fs::path &target, std::string &
     }
 
     // Copy new or modified files
-    for (const auto &entry : fs::recursive_directory_iterator(source, fs::directory_options::follow_directory_symlink, ec))
+    for (const auto &entry : fs::recursive_directory_iterator(source, fs::directory_options::none, ec))
     {
-        const fs::path rel = fs::relative(entry.path(), source, ec);
+        const fs::path rel = entry.path().lexically_relative(source);
         const fs::path dest = target / rel;
 
         if (entry.is_directory(ec))
@@ -61,6 +61,7 @@ bool syncDirectory(const fs::path &source, const fs::path &target, std::string &
         if (needCopy)
         {
             fs::create_directories(dest.parent_path(), ec);
+            fs::remove(dest, ec);
             fs::copy_file(entry.path(), dest, fs::copy_options::overwrite_existing, ec);
             if (!ec && keepSource)
                 fs::permissions(dest, fs::perms::owner_write, fs::perm_options::add, ec);

@@ -134,6 +134,40 @@ void testRealDiscIfPresent()
     std::cout << "  -> PASS\n";
 }
 
+void testSyncDirectorySymlinks(const fs::path &tempDir)
+{
+    std::cout << "[TEST] testSyncDirectorySymlinks..." << std::endl;
+    fs::path src = tempDir / "test_sync_src";
+    fs::path dst = tempDir / "test_sync_dst";
+    std::error_code ec;
+    fs::remove_all(src, ec);
+    fs::remove_all(dst, ec);
+
+    // Setup source with wrapper script and symlinks
+    fs::create_directories(src / "clang" / "bin", ec);
+    std::ofstream(src / "clang" / "bin" / "run-tool") << "#!/bin/sh\nexit 0\n";
+    fs::create_symlink("run-tool", src / "clang" / "bin" / "clang", ec);
+    fs::create_symlink("run-tool", src / "clang" / "bin" / "ninja", ec);
+    fs::create_symlink("clang/bin/ninja", src / "ninja", ec);
+
+    std::string err;
+    bool ok = syncDirectory(src, dst, err, true);
+    CHECK(ok);
+    CHECK(err.empty());
+    CHECK(fs::is_symlink(fs::symlink_status(dst / "ninja", ec)));
+    CHECK(fs::is_symlink(fs::symlink_status(dst / "clang" / "bin" / "clang", ec)));
+    CHECK(fs::is_regular_file(fs::status(dst / "clang" / "bin" / "run-tool", ec)));
+    CHECK(fs::read_symlink(dst / "ninja", ec) == "clang/bin/ninja");
+    CHECK(fs::read_symlink(dst / "clang" / "bin" / "clang", ec) == "run-tool");
+
+    // Second run should be a clean no-op
+    ok = syncDirectory(src, dst, err, true);
+    CHECK(ok);
+    CHECK(err.empty());
+
+    std::cout << "  -> PASS\n";
+}
+
 int main(int argc, char **argv)
 {
     std::cout << "=== Running DW5E Setup Tests ===" << std::endl;
@@ -147,6 +181,7 @@ int main(int argc, char **argv)
     testNinjaProgress();
     testInstallState(tempDir);
     testResetBuildIfMoved(tempDir);
+    testSyncDirectorySymlinks(tempDir);
     testRealDiscIfPresent();
 
     fs::remove_all(tempDir, ec);
