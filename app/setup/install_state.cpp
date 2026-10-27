@@ -80,6 +80,11 @@ bool writeInstallMarker(const fs::path &dataDir, const std::string &discSha1, st
 
     out << "DW5E Disc Installed\n";
     out << "sha1: " << discSha1 << "\n";
+    if (!out.flush())
+    {
+        error = "cannot finish writing install marker " + marker.string();
+        return false;
+    }
     return true;
 }
 

@@ -225,7 +225,31 @@ bool buildGame(const fs::path &root,
         }
     }
 
-#ifndef _WIN32
+    const auto copyRuntime = [&](const fs::path &source, const fs::path &target) {
+        if (source == target)
+            return true;
+        fs::copy_file(source, target, fs::copy_options::overwrite_existing, ec);
+        if (!ec)
+            return true;
+        error = "cannot stage runtime library " + source.string() + ": " + ec.message();
+        return false;
+    };
+#ifdef _WIN32
+    // Compiler runtimes are not CMake targets, so TARGET_RUNTIME_DLLS omits them.
+    // Stage once after the player build, beside its executable.
+    if (!tools.llvmMingwRoot.empty())
+    {
+        for (const char *name : {"libc++.dll", "libunwind.dll"})
+        {
+            if (!copyRuntime(tools.llvmMingwRoot / "bin" / name, executable.parent_path() / name))
+                return false;
+        }
+        const fs::path pthread = tools.llvmMingwRoot / "bin" / "libwinpthread-1.dll";
+        if (fs::is_regular_file(pthread, ec) &&
+            !copyRuntime(pthread, executable.parent_path() / pthread.filename()))
+            return false;
+    }
+#else
     // Colocate runtime shared libraries next to dw5e so $ORIGIN resolves them directly
     for (const auto &entry : fs::recursive_directory_iterator(buildDir, ec))
     {
@@ -235,8 +259,8 @@ bool buildGame(const fs::path &root,
             if (name.find(".so") != std::string::npos)
             {
                 const fs::path target = buildDir / entry.path().filename();
-                if (entry.path() != target)
-                    fs::copy_file(entry.path(), target, fs::copy_options::overwrite_existing, ec);
+                if (!copyRuntime(entry.path(), target))
+                    return false;
             }
         }
     }
@@ -250,8 +274,8 @@ bool buildGame(const fs::path &root,
                 const std::string name = entry.path().filename().string();
                 if (name.rfind("libc++", 0) == 0 && name.find(".so") != std::string::npos)
                 {
-                    fs::copy_file(entry.path(), buildDir / entry.path().filename(),
-                                  fs::copy_options::overwrite_existing, ec);
+                    if (!copyRuntime(entry.path(), buildDir / entry.path().filename()))
+                        return false;
                 }
             }
         }

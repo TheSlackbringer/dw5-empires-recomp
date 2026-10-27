@@ -134,7 +134,13 @@ bool generateCode(const fs::path &root,
         return false;
     }
 
-    if (!res.started || res.exitCode != 0)
+    if (!res.started || !res.error.empty())
+    {
+        error = res.error.empty() ? "failed to start ReXGlue recompiler" : res.error;
+        error += "; check " + logFile.string();
+        return false;
+    }
+    if (res.exitCode != 0)
     {
         error = "ReXGlue codegen failed (exit code " + std::to_string(res.exitCode) + "); check " + logFile.string();
         return false;

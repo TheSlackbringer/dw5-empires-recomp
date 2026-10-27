@@ -88,7 +88,14 @@ SetupRun::~SetupRun()
 
 void SetupRun::start()
 {
-    m_thread = std::thread(&SetupRun::run, this);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_status.running = true;
+    }
+    m_thread = std::thread([this] {
+        try { run(); }
+        catch (const std::exception &e) { fail(std::string("Setup failed: ") + e.what()); }
+    });
 }
 
 bool SetupRun::wait()
@@ -154,7 +161,7 @@ void SetupRun::run()
     const bool isInstalled = (installState(dataDir, &problem) == InstallState::Installed);
     std::vector<Step> plan;
 
-    if (isInstalled && !m_options.rebuild && m_options.discIso.empty())
+    if (isInstalled && m_options.discIso.empty())
     {
         plan = {Step::Generate, Step::Build};
     }
@@ -241,7 +248,11 @@ void SetupRun::run()
         }
 
         std::string markerErr;
-        writeInstallMarker(dataDir, kExpectedDiscSha1, markerErr);
+        if (!writeInstallMarker(dataDir, kExpectedDiscSha1, markerErr))
+        {
+            fail("Cannot finish disc installation: " + markerErr);
+            return;
+        }
         setStep(Step::Extract, 1.0, "Extraction complete.");
     }
 

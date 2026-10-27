@@ -13,6 +13,8 @@ import subprocess
 import sys
 import zipfile
 
+from verify_package import validate_package
+
 REPO = Path(__file__).resolve().parents[2]
 LLVM_MINGW_HOST = Path(os.environ.get('LLVM_MINGW_ROOT', Path.home() / '.local/opt/llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64'))
 WIN_TOOLS = Path(os.environ.get('DW5E_WIN_TOOLS', Path.home() / '.local/opt/windows-builder-tools'))
@@ -33,7 +35,7 @@ You need:
 You do not need to install anything: the compiler and all tools are in this folder.
 
 Play
-  1. Unzip this folder anywhere (keep the folder together).
+  1. Unzip to a short path, for example C:\\Games\\DW5E (keep the folder together).
   2. Start DW5E.exe. Windows may say "Windows protected your PC" because the program is not
      signed: choose "More info", then "Run anyway".
   3. First start: choose your disc image and press "Install & Play". Your disc is checked,
@@ -93,7 +95,7 @@ def git(*args, cwd=REPO):
     return subprocess.run(
         ['git', '-c', f'safe.directory={cwd.resolve()}', '-C', str(cwd), *args],
         env={**os.environ, 'GIT_OPTIONAL_LOCKS': '0'},
-        capture_output=True, text=True, check=True
+        capture_output=True, text=True, encoding='utf-8', check=True
     ).stdout
 
 
@@ -106,50 +108,95 @@ def version_for(test):
 
 
 def copy_tracked(src_repo, rel_paths, dest, skip=()):
+    src_repo = Path(src_repo).resolve()
     files = git('ls-files', '-z', '--recurse-submodules', '--', *rel_paths, cwd=src_repo).split('\0')
+    # core.symlinks=false checkouts store a link's target as a small text file.
+    # Resolve those index entries explicitly so Windows-built packages contain
+    # the same materialized sources as packages assembled on Linux.
+    links = set()
+    for record in git('ls-files', '--stage', '-z', '--', *rel_paths, cwd=src_repo).split('\0'):
+        metadata, separator, name = record.partition('\t')
+        if separator and metadata.startswith('120000 '):
+            links.add(name)
     n = 0
     for f in filter(None, files):
         if any(f.startswith(s) for s in skip):
             continue
         source = src_repo / f
-        if not source.exists() or source.is_dir():
+        seen = set()
+        while source.relative_to(src_repo).as_posix() in links and not source.is_symlink():
+            if source in seen:
+                fail(f'cyclic tracked source symlink: {f}')
+            seen.add(source)
+            link = source.read_text().strip()
+            source = (source.parent / link).resolve()
+            if not source.is_relative_to(src_repo.resolve()):
+                fail(f'tracked source symlink leaves source tree: {f}')
+        if not source.exists():
+            fail(f'required tracked source missing: {source}')
+        if source.is_dir():
             continue
         target = dest / f
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             shutil.copy2(source, target)
-            n += 1
-        except Exception:
-            pass
+        except OSError as exc:
+            fail(f'cannot copy required source {source}: {exc}')
+        n += 1
     return n
 
 
+# Windows and graphics-driver libraries supplied by the supported OS/driver.
+# Everything else must resolve from the build or bundled toolchain.
+SYSTEM_DLLS = {
+    'advapi32.dll', 'avrt.dll', 'bcrypt.dll', 'cfgmgr32.dll', 'comctl32.dll',
+    'comdlg32.dll', 'crypt32.dll', 'd3d12.dll', 'd3dcompiler_47.dll',
+    'dbghelp.dll', 'dinput8.dll', 'dwmapi.dll', 'dxcore.dll', 'dxgi.dll', 'gdi32.dll',
+    'hid.dll', 'imm32.dll', 'iphlpapi.dll', 'kernel32.dll', 'msvcrt.dll',
+    'ntdll.dll', 'ole32.dll', 'oleaut32.dll', 'powrprof.dll', 'psapi.dll',
+    'rpcrt4.dll', 'secur32.dll', 'setupapi.dll', 'shell32.dll', 'shlwapi.dll',
+    'ucrtbase.dll', 'user32.dll', 'userenv.dll', 'uxtheme.dll', 'version.dll',
+    'vulkan-1.dll', 'winhttp.dll', 'wininet.dll', 'winmm.dll', 'ws2_32.dll',
+    'wtsapi32.dll', 'xinput1_4.dll', 'xinput9_1_0.dll',
+}
+
+
 def dll_closure(exe, search_dirs):
-    readobj = LLVM_MINGW_HOST / 'bin' / 'llvm-readobj'
-    if not readobj.exists():
-        readobj = shutil.which('llvm-readobj') or 'llvm-readobj'
+    tool_name = 'llvm-readobj.exe' if os.name == 'nt' else 'llvm-readobj'
+    readobj = LLVM_MINGW_HOST / 'bin' / tool_name
+    if not readobj.is_file():
+        readobj = shutil.which(tool_name) or tool_name
+    # Index nested CMake output directories as well as the toolchain bin dir.
+    available = {}
+    for directory in search_dirs:
+        directory = Path(directory)
+        if directory.is_dir():
+            for path in sorted(directory.rglob('*')):
+                if path.is_file() and path.suffix.lower() == '.dll':
+                    available.setdefault(path.name.lower(), path)
     found, todo = {}, [exe]
     while todo:
         current = todo.pop()
         try:
-            out = subprocess.run([str(readobj), '--coff-imports', str(current)], capture_output=True, text=True).stdout
-        except Exception:
-            break
-        for line in out.splitlines():
+            result = subprocess.run([str(readobj), '--coff-imports', str(current)],
+                                    capture_output=True, text=True)
+        except OSError as exc:
+            fail(f'cannot inspect DLL dependencies of {current}: {exc}')
+        if result.returncode:
+            fail(f'DLL dependency inspection failed for {current}: {result.stderr.strip()}')
+        for line in result.stdout.splitlines():
             line = line.strip()
             if not (line.startswith('Name:') and line.lower().endswith('.dll')):
                 continue
             name = line.split(':', 1)[1].strip()
-            if name.lower() in found:
+            key = name.lower()
+            if key in found or key in SYSTEM_DLLS or key.startswith(('api-ms-win-', 'ext-ms-win-')):
                 continue
-            for d in search_dirs:
-                if not Path(d).exists():
-                    continue
-                hit = next((p for p in Path(d).glob('*') if p.name.lower() == name.lower()), None)
-                if hit:
-                    found[name.lower()] = hit
-                    todo.append(hit)
-                    break
+            hit = available.get(key)
+            if hit is None:
+                fail(f'unresolved DLL dependency {name} required by {current}')
+            found[key] = hit
+            todo.append(hit)
     return sorted(found.values(), key=lambda p: p.name.lower())
 
 
@@ -220,12 +267,19 @@ def windows(build, recomp_build, test):
     if not launcher.exists():
         launcher = build / 'dw5e_setup.exe'
     win_candidates = [
+        recomp_build / 'rexgluerd.exe',
         recomp_build / 'rexglue.exe',
+        build / 'rexglue-sdk/src/rexglue/rexgluerd.exe',
         build / 'rexglue-sdk/src/rexglue/rexglue.exe',
+        REPO / 'rexglue-sdk/out/win-amd64/rexgluerd.exe',
         REPO / 'rexglue-sdk/out/win-amd64/rexglue.exe',
         REPO / 'tools/rexglue.exe',
     ]
     recompiler = next((p for p in win_candidates if p.exists()), None)
+
+    if recompiler is None:
+        fail('required ReXGlue recompiler missing; searched: ' +
+             ', '.join(str(p) for p in win_candidates))
 
     for p in (launcher, LLVM_MINGW_WIN_ZIP, CMAKE_WIN_ZIP, NINJA_WIN_ZIP):
         if not p.exists():
@@ -240,7 +294,7 @@ def windows(build, recomp_build, test):
 
     # Launcher
     shutil.copy2(launcher, stage / 'DW5E.exe')
-    host_dlls = [build, LLVM_MINGW_HOST / 'x86_64-w64-mingw32/bin']
+    host_dlls = [recompiler.parent, build, LLVM_MINGW_HOST / 'x86_64-w64-mingw32/bin', LLVM_MINGW_HOST / 'bin']
     for dll in dll_closure(launcher, host_dlls):
         shutil.copy2(dll, stage / dll.name)
     (stage / 'BUILD_ID').write_text(version + '\n')
@@ -250,15 +304,14 @@ def windows(build, recomp_build, test):
                      skip=('app/generated/default/',))
     if (REPO / 'rexglue-sdk').exists():
         n += copy_tracked(REPO / 'rexglue-sdk', ['.'], stage / 'rexglue-sdk',
-                          skip=('tools/binutils/', 'out/', 'tests/', 'docs/'))
+                          skip=('tools/binutils/', 'out/', 'tests/', 'docs/', 'thirdparty/moltenvk/', 'thirdparty/vulkan-loader/tests/'))
 
     # Bundled Tools
     tools = stage / 'tools'
     tools.mkdir(parents=True, exist_ok=True)
-    if recompiler and recompiler.exists():
-        shutil.copy2(recompiler, tools / 'rexglue.exe')
-        for dll in dll_closure(recompiler, host_dlls):
-            shutil.copy2(dll, tools / dll.name)
+    shutil.copy2(recompiler, tools / 'rexglue.exe')
+    for dll in dll_closure(recompiler, host_dlls):
+        shutil.copy2(dll, tools / dll.name)
 
     unzip_into(LLVM_MINGW_WIN_ZIP, tools / 'llvm-mingw')
     unzip_into(CMAKE_WIN_ZIP, tools / 'cmake')
@@ -271,6 +324,7 @@ def windows(build, recomp_build, test):
     shutil.copy2(REPO / 'LICENSE', lic / 'dw5e (GPL-3.0).txt')
     shutil.copy2(REPO / 'rexglue-sdk/LICENSE', lic / 'rexglue-sdk (BSD-3-Clause).txt')
 
+    validate_package(stage, windows=True)
     scan(stage, windows=True)
     archive = dist / f'{name}.zip'
     archive.unlink(missing_ok=True)
@@ -302,6 +356,10 @@ def linux(build, recomp_build, sdk, appimage_tools, test):
     ]
     recompiler = next((p for p in recompiler_candidates if p.exists()), None)
 
+    if recompiler is None:
+        fail('required ReXGlue recompiler missing; searched: ' +
+             ', '.join(str(p) for p in recompiler_candidates))
+
     for p in (launcher, sdk / 'bin/clang++', appimage_tools / 'linuxdeploy-x86_64.AppImage', appimage_tools / 'appimagetool-x86_64.AppImage'):
         if not p.exists():
             fail(f'required build artifact or tool missing: {p}')
@@ -320,7 +378,7 @@ def linux(build, recomp_build, sdk, appimage_tools, test):
                      skip=('app/generated/default/',))
     if (REPO / 'rexglue-sdk').exists():
         n += copy_tracked(REPO / 'rexglue-sdk', ['.'], stage / 'rexglue-sdk',
-                          skip=('tools/binutils/', 'out/', 'tests/', 'docs/'))
+                          skip=('tools/binutils/', 'out/', 'tests/', 'docs/', 'thirdparty/moltenvk/', 'thirdparty/vulkan-loader/tests/'))
 
     shutil.copy2(launcher, stage / 'DW5E')
     shutil.copy2(launcher, stage / 'usr/bin/dw5e_setup')
@@ -387,6 +445,7 @@ exec "$root/DW5E" --root "$root" "$@"
 ''')
     app_run.chmod(0o755)
 
+    validate_package(stage, windows=False)
     scan(stage, windows=False)
     archive = dist / f'{name}.AppImage'
     image_tool = appimage_tools / 'appimagetool-x86_64.AppImage'

@@ -2,6 +2,8 @@
 
 #include <chrono>
 #include <fstream>
+#include <map>
+#include <system_error>
 #include <thread>
 
 #ifdef _WIN32
@@ -21,6 +23,13 @@ extern char **environ;
 
 namespace dw5e::setup {
 
+namespace {
+void logError(const std::filesystem::path &log, const std::string &error)
+{
+    std::ofstream(log, std::ios::app) << error << '\n';
+}
+} // namespace
+
 #ifdef _WIN32
 
 namespace {
@@ -32,6 +41,47 @@ std::wstring widen(const std::string &utf8)
     std::wstring out(static_cast<size_t>(n), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), out.data(), n);
     return out;
+}
+
+std::string windowsError(DWORD code)
+{
+    return "Windows error " + std::to_string(code) + ": " +
+           std::system_category().message(static_cast<int>(code));
+}
+
+struct EnvironmentLess {
+    bool operator()(const std::wstring &a, const std::wstring &b) const
+    {
+        return _wcsicmp(a.c_str(), b.c_str()) < 0;
+    }
+};
+
+std::vector<wchar_t> childEnvironment(
+    const std::vector<std::pair<std::string, std::string>> &extra)
+{
+    std::map<std::wstring, std::wstring, EnvironmentLess> values;
+    if (wchar_t *block = GetEnvironmentStringsW())
+    {
+        for (const wchar_t *entry = block; *entry; entry += wcslen(entry) + 1)
+        {
+            const std::wstring value(entry);
+            const auto split = value.find(L'=', value[0] == L'=' ? 1 : 0);
+            if (split != std::wstring::npos)
+                values[value.substr(0, split)] = value.substr(split + 1);
+        }
+        FreeEnvironmentStringsW(block);
+    }
+    for (const auto &[key, value] : extra)
+        values[widen(key)] = widen(value);
+    std::vector<wchar_t> result;
+    for (const auto &[key, value] : values)
+    {
+        const auto entry = key + L"=" + value;
+        result.insert(result.end(), entry.begin(), entry.end());
+        result.push_back(L'\0');
+    }
+    result.push_back(L'\0');
+    return result;
 }
 
 void appendQuoted(std::wstring &cmd, const std::wstring &arg)
@@ -78,6 +128,11 @@ ProcessResult runProcess(const std::filesystem::path &program,
                          const std::vector<std::pair<std::string, std::string>> &extraEnv)
 {
     ProcessResult result;
+    if (cancel && cancel->load())
+    {
+        result.cancelled = true;
+        return result;
+    }
     std::wstring cmd;
     appendQuoted(cmd, program.wstring());
     for (const auto &arg : args)
@@ -92,71 +147,94 @@ ProcessResult runProcess(const std::filesystem::path &program,
                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (log == INVALID_HANDLE_VALUE)
     {
-        result.error = "cannot open log file " + logFile.string();
+        result.error = "cannot open log file " + logFile.string() + ": " + windowsError(GetLastError());
         return result;
     }
-
+    // A GUI launcher may not have valid inherited standard input.
+    HANDLE input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               &inherit, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdInput = input;
     si.hStdOutput = log;
     si.hStdError = log;
-
     PROCESS_INFORMATION pi{};
     const std::wstring dir = workingDirectory.wstring();
 
     HANDLE job = CreateJobObjectW(nullptr, nullptr);
-    if (job)
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
+    jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli)))
     {
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
-        jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        SetInformationJobObject(job, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+        result.error = "cannot create subprocess job: " + windowsError(GetLastError());
+        if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
+        CloseHandle(log);
+        if (job) CloseHandle(job);
+        logError(logFile, result.error);
+        return result;
     }
-
+    auto environment = extraEnv.empty() ? std::vector<wchar_t>() : childEnvironment(extraEnv);
     if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
-                        CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr,
+                        CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+                        environment.empty() ? nullptr : environment.data(),
                         dir.empty() ? nullptr : dir.c_str(), &si, &pi))
     {
+        result.error = "failed to start " + program.string() + ": " + windowsError(GetLastError());
+        if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
         CloseHandle(log);
-        if (job)
-            CloseHandle(job);
-        result.error = "failed to start " + program.string();
+        CloseHandle(job);
+        logError(logFile, result.error);
         return result;
     }
 
-    if (job)
-        AssignProcessToJobObject(job, pi.hProcess);
-    ResumeThread(pi.hThread);
+    const bool assigned = AssignProcessToJobObject(job, pi.hProcess);
+    if (!assigned)
+    {
+        result.error = "cannot manage subprocess " + program.string() + ": " + windowsError(GetLastError());
+        TerminateProcess(pi.hProcess, 1);
+    }
+    else if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1))
+    {
+        result.error = "cannot resume subprocess " + program.string() + ": " + windowsError(GetLastError());
+        TerminateJobObject(job, 1);
+    }
+    else
+        result.started = true;
     CloseHandle(pi.hThread);
+    if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
     CloseHandle(log);
 
-    result.started = true;
     while (true)
     {
         DWORD wait = WaitForSingleObject(pi.hProcess, 100);
         if (wait == WAIT_OBJECT_0)
         {
             DWORD code = 0;
-            GetExitCodeProcess(pi.hProcess, &code);
-            result.exitCode = static_cast<int>(code);
+            if (GetExitCodeProcess(pi.hProcess, &code))
+                result.exitCode = static_cast<int>(code);
+            else
+                result.error = "cannot read subprocess result: " + windowsError(GetLastError());
+            break;
+        }
+        if (wait == WAIT_FAILED)
+        {
+            result.error = "cannot wait for subprocess: " + windowsError(GetLastError());
+            TerminateJobObject(job, 1);
             break;
         }
         if (cancel && cancel->load())
         {
             result.cancelled = true;
-            if (job)
-                TerminateJobObject(job, 1);
-            else
-                TerminateProcess(pi.hProcess, 1);
-            WaitForSingleObject(pi.hProcess, 5000);
+            TerminateJobObject(job, 1);
+            WaitForSingleObject(pi.hProcess, INFINITE);
             break;
         }
     }
-
     CloseHandle(pi.hProcess);
-    if (job)
-        CloseHandle(job);
+    CloseHandle(job);
+    if (!result.error.empty())
+        logError(logFile, result.error);
     return result;
 }
 
@@ -182,7 +260,7 @@ bool launchDetached(const std::filesystem::path &program,
                         CREATE_DEFAULT_ERROR_MODE, nullptr,
                         dir.empty() ? nullptr : dir.c_str(), &si, &pi))
     {
-        error = "cannot launch " + program.string();
+        error = "cannot launch " + program.string() + ": " + windowsError(GetLastError());
         return false;
     }
 
@@ -201,6 +279,11 @@ ProcessResult runProcess(const std::filesystem::path &program,
                          const std::vector<std::pair<std::string, std::string>> &extraEnv)
 {
     ProcessResult result;
+    if (cancel && cancel->load())
+    {
+        result.cancelled = true;
+        return result;
+    }
     int logFd = open(logFile.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (logFd < 0)
     {
@@ -208,22 +291,48 @@ ProcessResult runProcess(const std::filesystem::path &program,
         return result;
     }
 
+    int launchPipe[2];
+    if (pipe(launchPipe) != 0)
+    {
+        result.error = "cannot create subprocess error pipe: " + std::string(std::strerror(errno));
+        close(logFd);
+        logError(logFile, result.error);
+        return result;
+    }
+    if (fcntl(launchPipe[1], F_SETFD, FD_CLOEXEC) < 0)
+    {
+        result.error = "cannot prepare subprocess error pipe: " + std::string(std::strerror(errno));
+        close(launchPipe[0]);
+        close(launchPipe[1]);
+        close(logFd);
+        logError(logFile, result.error);
+        return result;
+    }
     pid_t pid = fork();
     if (pid < 0)
     {
+        const int code = errno;
         close(logFd);
-        result.error = "fork failed: " + std::string(std::strerror(errno));
+        close(launchPipe[0]);
+        close(launchPipe[1]);
+        result.error = "fork failed: " + std::string(std::strerror(code));
+        logError(logFile, result.error);
         return result;
     }
 
     if (pid == 0)
     {
-        // Child process
+        // Successful exec closes the pipe; failed chdir/exec reports errno.
+        close(launchPipe[0]);
+        const auto launchFailed = [&](int code) {
+            (void)!write(launchPipe[1], &code, sizeof(code));
+            _exit(127);
+        };
         setpgid(0, 0); // Own process group for clean subtree termination
         if (!workingDirectory.empty())
         {
             if (chdir(workingDirectory.c_str()) != 0)
-                _exit(127);
+                launchFailed(errno);
         }
 
         for (const auto &[k, v] : extraEnv)
@@ -241,14 +350,27 @@ ProcessResult runProcess(const std::filesystem::path &program,
         argv.push_back(nullptr);
 
         execvp(progStr.c_str(), const_cast<char *const *>(argv.data()));
-        const char *err = std::strerror(errno);
-        (void)!write(STDERR_FILENO, "execvp error: ", 14);
-        (void)!write(STDERR_FILENO, err, std::strlen(err));
-        (void)!write(STDERR_FILENO, "\n", 1);
-        _exit(127);
+        launchFailed(errno);
     }
 
     close(logFd);
+    close(launchPipe[1]);
+    int launchCode = 0;
+    ssize_t received;
+    do {
+        received = read(launchPipe[0], &launchCode, sizeof(launchCode));
+    } while (received < 0 && errno == EINTR);
+    close(launchPipe[0]);
+    if (received != 0)
+    {
+        result.error = "failed to start " + program.string() + ": " +
+                       std::string(std::strerror(received > 0 ? launchCode : errno));
+        if (received < 0)
+            kill(pid, SIGKILL);
+        while (waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {}
+        logError(logFile, result.error);
+        return result;
+    }
     result.started = true;
 
     while (true)
@@ -265,6 +387,8 @@ ProcessResult runProcess(const std::filesystem::path &program,
         }
         else if (waited < 0)
         {
+            if (errno == EINTR)
+                continue;
             result.error = "waitpid error: " + std::string(std::strerror(errno));
             break;
         }

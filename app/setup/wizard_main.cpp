@@ -85,11 +85,6 @@ int main(int argc, char **argv)
     {
         layoutError = "cannot find project root (dw5e_manifest.toml or app/CMakeLists.txt missing)";
     }
-    else if (findLayout(root, kWindows, layout, layoutError))
-    {
-        options.recompiler = layout.recompiler;
-        options.tools = layout.tools;
-    }
     options.root = root;
 
     // Release package check
@@ -165,6 +160,13 @@ int main(int argc, char **argv)
             return 0;
         }
         return startGame();
+    }
+
+    // Build-only prerequisites must not block an already-built game's fast path.
+    if (layoutError.empty() && findLayout(root, kWindows, layout, layoutError))
+    {
+        options.recompiler = layout.recompiler;
+        options.tools = layout.tools;
     }
 
 #ifndef _WIN32

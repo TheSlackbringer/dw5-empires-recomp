@@ -81,7 +81,8 @@ int runWizardConsole(const SetupOptions &options)
         std::cout << "Disc image:     " << options.discIso.string() << "\n";
     std::cout << "----------------------------------------------------\n";
 
-    if (options.discIso.empty())
+    if (options.discIso.empty() &&
+        installState(options.effectiveDataDir()) != InstallState::Installed)
     {
         std::cerr << "\nERROR: No disc image specified.\n"
                   << "To run in console mode: pass --iso /path/to/dw5e.iso\n"
@@ -132,7 +133,14 @@ int runWizardConsole(const SetupOptions &options)
 bool runWizardWindow(const WizardConfig &config)
 {
     if (config.noWindow)
+    {
+        if (!config.layoutError.empty())
+        {
+            std::cerr << "Setup error: " << config.layoutError << std::endl;
+            return false;
+        }
         return runWizardConsole(config.base) == 0;
+    }
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
     {
@@ -247,7 +255,11 @@ bool runWizardWindow(const WizardConfig &config)
 
             if (!config.layoutError.empty())
             {
-                ImGui::TextColored(ImVec4(0.95f, 0.30f, 0.30f, 1.0f), "Setup Error: %s", config.layoutError.c_str());
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.30f, 0.30f, 1.0f));
+                ImGui::TextWrapped("Setup Error: %s", config.layoutError.c_str());
+                ImGui::PopStyleColor();
+                if (ImGui::Button("Exit", ImVec2(100, 36)))
+                    quit = true;
             }
             else if (!activeRun)
             {
@@ -348,7 +360,8 @@ bool runWizardWindow(const WizardConfig &config)
                 {
                     canStart = true;
                 }
-                else if (config.discInstalled && validatedIsoPath.empty())
+                else if (validatedIsoPath.empty() &&
+                         installState(config.base.effectiveDataDir()) == InstallState::Installed)
                 {
                     canStart = true;
                 }
@@ -397,12 +410,20 @@ bool runWizardWindow(const WizardConfig &config)
                 }
                 else if (st.failed)
                 {
-                    ImGui::TextColored(ImVec4(0.95f, 0.25f, 0.25f, 1.0f), "Failed: %s", st.error.c_str());
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.25f, 0.25f, 1.0f));
+                    ImGui::TextWrapped("Failed: %s", st.error.c_str());
+                    ImGui::PopStyleColor();
                     ImGui::Spacing();
                     if (ImGui::Button("Back", ImVec2(120, 32)))
                     {
                         activeRun.reset();
                     }
+                }
+                else if (st.cancelled)
+                {
+                    ImGui::TextWrapped("Setup cancelled. You can retry with your installed files or choose a disc image.");
+                    if (ImGui::Button("Back", ImVec2(120, 32)))
+                        activeRun.reset();
                 }
                 else if (st.finished)
                 {

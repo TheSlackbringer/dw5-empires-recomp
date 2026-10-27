@@ -4,8 +4,7 @@
 //   u32 guest_address, u32 length, length bytes of raw (big-endian guest) data.
 // Unmapped 64 KiB chunks are skipped.
 
-#include <sys/uio.h>
-#include <unistd.h>
+#include "dw5e_safe_read.h"
 
 #include <atomic>
 #include <cstdint>
@@ -33,9 +32,7 @@ constexpr Range kRanges[] = {{0x40000000u, 0x80000000u}, {0x82000000u, 0x82B5000
 std::atomic<int> g_counter{0};
 
 bool ReadChunk(const uint8_t* host, std::vector<uint8_t>& buf) {
-  iovec local{buf.data(), buf.size()};
-  iovec remote{const_cast<uint8_t*>(host), buf.size()};
-  return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(buf.size());
+  return dw5e::debug::readMemory(buf.data(), host, buf.size());
 }
 
 void TakeSnapshot() {

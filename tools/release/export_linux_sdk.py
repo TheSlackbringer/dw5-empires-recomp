@@ -25,7 +25,7 @@ def copy_file(source, target):
 def export_sdk(output, cxx=None):
     output.mkdir(parents=True, exist_ok=True)
     programs = {}
-    for name in ['clang', 'ld.lld', 'llvm-ar', 'cmake', 'ninja', 'pkg-config']:
+    for name in ['clang', 'ld.lld', 'llvm-ar', 'cmake', 'ninja', 'pkg-config', 'wayland-scanner']:
         if name in ('clang', 'ld.lld', 'llvm-ar'):
             candidates = [
                 f"/usr/lib/llvm-23/bin/{'lld' if name == 'ld.lld' else name}",
@@ -58,6 +58,11 @@ def export_sdk(output, cxx=None):
             programs['llvm-ar'] = str(p.parent / 'llvm-ar')
             break
 
+    required_tools = {'clang', 'ld.lld', 'llvm-ar', 'cmake', 'ninja', 'pkg-config', 'wayland-scanner'}
+    missing = sorted(required_tools - programs.keys())
+    if missing:
+        raise SystemExit('Linux SDK host tools missing: ' + ', '.join(missing))
+
     libraries = set()
     for name, path in programs.items():
         target = output / 'cmake/bin/cmake' if name == 'cmake' else output / 'libexec' / name
@@ -68,8 +73,11 @@ def export_sdk(output, cxx=None):
                 library = Path(hit)
                 if not GLIBC.match(library.name):
                     libraries.add(library)
-        except Exception:
-            pass
+        except subprocess.CalledProcessError as exc:
+            if 'not a dynamic executable' not in str(exc.output):
+                raise SystemExit(f'cannot inspect Linux tool dependencies for {path}: {exc}') from exc
+        except OSError as exc:
+            raise SystemExit(f'cannot inspect Linux tool dependencies for {path}: {exc}') from exc
 
     for library in libraries:
         copy_file(library, output / 'host-libs' / library.name)
@@ -91,7 +99,7 @@ def export_sdk(output, cxx=None):
     ]
     clang_lib = next((p for p in llvm_candidates if p.exists() and p.is_dir()), None)
     if clang_lib:
-        shutil.copytree(clang_lib, output / 'lib/clang', dirs_exist_ok=True, symlinks=True)
+        shutil.copytree(clang_lib, output / 'lib/clang', dirs_exist_ok=True)
 
     # Copy CMake modules
     for cmake_share in Path('/usr/share').glob('cmake*'):
@@ -108,6 +116,37 @@ def export_sdk(output, cxx=None):
             if lib.is_file():
                 copy_file(lib, output / 'lib' / lib.name)
 
+    # Reuse the DW5XL offline SDK layout: compiler binaries alone still depend on
+    # the player's C development headers, startup objects and linker scripts.
+    sysroot = output / 'sysroot'
+    shutil.copytree(Path('/usr/include'), sysroot / 'usr/include', dirs_exist_ok=True)
+    for directory in ('usr/lib/x86_64-linux-gnu', 'lib/x86_64-linux-gnu'):
+        for source in Path('/' + directory).iterdir():
+            if source.is_file() and SDK_LIBRARY.match(source.name):
+                copy_file(source, sysroot / directory / source.name)
+    for version in Path('/usr/lib/gcc/x86_64-linux-gnu').glob('*'):
+        if version.is_dir():
+            for source in version.iterdir():
+                if source.is_file() and source.name.startswith(('crt', 'libgcc', 'libgcov')):
+                    copy_file(source, sysroot / 'usr/lib/gcc/x86_64-linux-gnu' /
+                              version.name / source.name)
+    copy_file(Path('/lib64/ld-linux-x86-64.so.2'), sysroot / 'lib64/ld-linux-x86-64.so.2')
+    for directory in ('usr/lib/x86_64-linux-gnu/pkgconfig', 'usr/share/pkgconfig'):
+        source = Path('/' + directory)
+        if source.is_dir():
+            shutil.copytree(source, sysroot / directory, dirs_exist_ok=True)
+    for documentation in (Path('/usr/share/doc'), cxx / 'usr/share/doc' if cxx else None):
+        if documentation and documentation.is_dir():
+            for source in documentation.rglob('*'):
+                if source.is_file():
+                    copy_file(source, output / 'licenses' / source.relative_to(documentation))
+    versions = sorted((p.name for p in (output / 'lib/clang').iterdir()
+                       if p.is_dir() and re.fullmatch(r'\d+(?:\.\d+)*', p.name)),
+                      key=lambda name: tuple(map(int, name.split('.'))))
+    if not versions:
+        raise SystemExit('Clang resource headers are missing from the exported Linux SDK')
+    resource_version = versions[-1]
+
 
     bin_dir = output / 'bin'
     bin_dir.mkdir(exist_ok=True)
@@ -122,12 +161,14 @@ case "$tool" in
   cmake)
     exec "$sdk/cmake/bin/cmake" "$@" ;;
   clang|clang++)
-    exec "$sdk/libexec/$tool" "$@" ;;
+    exec "$sdk/libexec/$tool" --sysroot="$sdk/sysroot" --gcc-toolchain="$sdk/sysroot/usr" \\
+      -resource-dir="$sdk/lib/clang/@RESOURCE_VERSION@" -L"$sdk/lib" "$@" ;;
   pkg-config)
-    exec "$sdk/libexec/pkg-config" "$@" ;;
+    export PKG_CONFIG_SYSROOT_DIR="$sdk/sysroot"
+    export PKG_CONFIG_LIBDIR="$sdk/sysroot/usr/lib/x86_64-linux-gnu/pkgconfig:$sdk/sysroot/usr/share/pkgconfig" ;;
 esac
 exec "$sdk/libexec/$tool" "$@"
-''')
+'''.replace('@RESOURCE_VERSION@', resource_version))
     wrapper.chmod(0o755)
 
     for name in (*programs, 'clang++', 'llvm-ranlib', 'lld'):

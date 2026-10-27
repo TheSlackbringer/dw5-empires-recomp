@@ -102,6 +102,10 @@ function(rexglue_configure_target target_name)
     rexglue_apply_target_settings(${target_name})
 
     if(WIN32)
+        if(MINGW)
+            # windowed_app_main_sdl.cpp provides wWinMain, not WinMain.
+            target_link_options(${target_name} PRIVATE -municode)
+        endif()
         # Stage runtime DLLs (rexruntime, TracyClient, etc.) next to the host
         # binary on every link. copy_if_different is a no-op when up to date.
         add_custom_command(TARGET ${target_name} POST_BUILD

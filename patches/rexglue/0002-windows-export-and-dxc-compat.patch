@@ -1,0 +1,101 @@
+diff --git a/cmake/rexglue_helpers.cmake b/cmake/rexglue_helpers.cmake
+index 41e6dce3..b3ab99eb 100644
+--- a/cmake/rexglue_helpers.cmake
++++ b/cmake/rexglue_helpers.cmake
+@@ -102,6 +102,10 @@ function(rexglue_configure_target target_name)
+     rexglue_apply_target_settings(${target_name})
+-
++
+     if(WIN32)
++        if(MINGW)
++            # windowed_app_main_sdl.cpp provides wWinMain, not WinMain.
++            target_link_options(${target_name} PRIVATE -municode)
++        endif()
+         # Stage runtime DLLs (rexruntime, TracyClient, etc.) next to the host
+         # binary on every link. copy_if_different is a no-op when up to date.
+         add_custom_command(TARGET ${target_name} POST_BUILD
+diff --git a/include/rex/hook.h b/include/rex/hook.h
+index 4ce4f9b9..d551ced3 100644
+--- a/include/rex/hook.h
++++ b/include/rex/hook.h
+@@ -46,7 +46,11 @@
+ #endif
+-
++
+ // Define a raw hook with direct ctx/base access.
++#if defined(_WIN32) && defined(rexruntime_EXPORTS)
++#define REX_HOOK_RAW(name) extern "C" __declspec(dllexport) REX_FUNC(name)
++#else
+ #define REX_HOOK_RAW(name) extern "C" REX_FUNC(name)
++#endif
+-
++
+ // Stub: logs a warning when called.
+ #define REX_STUB(subroutine)              \
+@@ -68,16 +72,27 @@
+     ctx.r3.u64 = (value);                                                                 \
+   }
+-
++
++// COFF's automatic DLL export scan skips __imp_* names as import pointers,
++// but our __imp__* symbols are actual PPC ABI wrapper functions.
++#ifdef _WIN32
++#define REX_EXPORT_DECL(name) extern "C" __declspec(dllexport) REX_FUNC(name);
++#else
++#define REX_EXPORT_DECL(name)
++#endif
++
+ // Export: hook + register in global registry for kernel ordinal lookup.
+ #define REX_EXPORT(name, function) \
++  REX_EXPORT_DECL(name)            \
+   REX_HOOK(name, function)         \
+   static rex::ppc::detail::PPCFuncRegistrar _ppc_reg_##name(#name, &name);
+-
++
+ #define REX_EXPORT_STUB(name) \
++  REX_EXPORT_DECL(name)       \
+   REX_STUB(name)              \
+   static rex::ppc::detail::PPCFuncRegistrar _ppc_reg_##name(#name, &name);
+-
++
+ #define REX_EXPORT_STUB_RETURN(name, retval) \
++  REX_EXPORT_DECL(name)                     \
+   REX_STUB_RETURN(name, retval)              \
+   static rex::ppc::detail::PPCFuncRegistrar _ppc_reg_##name(#name, &name);
+-
++
+diff --git a/include/rex/ui/d3d12/d3d12_api.h b/include/rex/ui/d3d12/d3d12_api.h
+index 312092bc..15d63ffc 100644
+--- a/include/rex/ui/d3d12/d3d12_api.h
++++ b/include/rex/ui/d3d12/d3d12_api.h
+@@ -41,4 +41,12 @@ __CRT_UUID_DECL(IDXGraphicsAnalysis, 0x9f251514, 0x9d4d, 0x4902, 0x9d, 0x60, 0x1
+ #include <dxcapi.h>
+ #include "DxbcConverter.h"
+-
++
++// Match the UUID annotations in Microsoft's DXC headers for MinGW's
++// __uuidof implementation, as for IDXGraphicsAnalysis above.
++#ifdef __CRT_UUID_DECL
++__CRT_UUID_DECL(IDxbcConverter, 0x5f956ed5, 0x78d1, 0x4b15, 0x82, 0x47, 0xf7, 0x18, 0x76, 0x14, 0xa0, 0x41)
++__CRT_UUID_DECL(IDxcUtils, 0x4605c4cb, 0x2019, 0x492a, 0xad, 0xa4, 0x65, 0xf2, 0x0b, 0xb7, 0xd6, 0x7f)
++__CRT_UUID_DECL(IDxcCompiler, 0x8c210bf3, 0x011f, 0x4422, 0x8d, 0x70, 0x6f, 0x9a, 0xcb, 0x8d, 0xb6, 0x17)
++#endif
++
+ // clang-format on
+diff --git a/src/system/CMakeLists.txt b/src/system/CMakeLists.txt
+index fc46d869..1c5f0904 100644
+--- a/src/system/CMakeLists.txt
++++ b/src/system/CMakeLists.txt
+@@ -106,6 +106,11 @@ if(REXGLUE_ENABLE_PERF_COUNTERS)
+ endif()
+-
++
+ if(WIN32)
++    # MinGW stops automatic C++ exports once explicit dllexport wrappers exist.
++    # Keep the prior public runtime API alongside the explicitly exported shims.
++    if(MINGW)
++        target_link_options(rexruntime PRIVATE "LINKER:--export-all-symbols")
++    endif()
+     target_link_libraries(rexruntime PRIVATE ws2_32)
+     target_link_libraries(rexruntime PUBLIC dxgi dxguid)
+     target_compile_definitions(rexruntime PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)

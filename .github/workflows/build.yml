@@ -60,7 +60,7 @@ jobs:
 
       - name: Build setup wizard, tests & ReXGlue recompiler
         run: |
-          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test rexglue -j$(nproc)
+          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test rexgpu-xenos rexglue -j$(nproc)
 
       - name: Run unit tests
         run: |
@@ -87,6 +87,18 @@ jobs:
             --build app/build-linux \
             --linux-sdk dist/sdk \
             --appimage-tools /opt/appimage-tools
+
+      - name: Verify actual AppImage contents and native offline tools
+        run: |
+          sha256sum -c dist/*.AppImage.sha256
+          set -- dist/*.AppImage
+          [ "$#" -eq 1 ]
+          image="$(realpath "$1")"
+          scratch="$(mktemp -d)"
+          cd "$scratch"
+          "$image" --appimage-extract > /dev/null
+          python3 "$GITHUB_WORKSPACE/tools/release/verify_package.py" \
+            --root "$scratch/squashfs-root" --platform linux --smoke
 
       - name: Upload Linux AppImage artifact
         uses: actions/upload-artifact@v4
@@ -153,7 +165,7 @@ jobs:
 
       - name: Build Windows setup wizard & ReXGlue recompiler
         run: |
-          cmake --build app/build-windows --target dw5e_setup rexglue -j$(nproc)
+          cmake --build app/build-windows --target dw5e_dxc_uuid_test dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test rexgpu-xenos rexglue -j$(nproc)
 
       - name: Package Windows compiler zip
         env:
@@ -171,9 +183,69 @@ jobs:
             dist/*.zip
             dist/*.zip.sha256
 
+      - name: Upload native Windows test executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: DW5E-windows-unit-tests
+          path: |
+            app/build-windows/dw5e_setup_test.exe
+            app/build-windows/dw5e_setup_reliability_test.exe
+            app/build-windows/dw5e_safe_read_test.exe
+            app/build-windows/dw5e_dxc_uuid_test.exe
+            app/build-windows/dw5e_kernel_export_test.exe
+            app/build-windows/rexglue-sdk/src/system/*.dll
+            app/build-windows/rexglue-sdk/thirdparty/*.dll
+          if-no-files-found: error
+
+  windows-native:
+    name: Native Windows package verification
+    needs: windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Windows builder
+        uses: actions/download-artifact@v4
+        with:
+          name: DW5E-windows-x64
+          path: artifacts/package
+      - name: Download setup unit tests
+        uses: actions/download-artifact@v4
+        with:
+          name: DW5E-windows-unit-tests
+          path: artifacts/tests
+      - name: Verify archive checksum and native packaged tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = @(Get-ChildItem artifacts/package -Filter '*.zip')
+          if ($archive.Count -ne 1) { throw 'Expected exactly one Windows ZIP' }
+          $checksum = Get-Content -LiteralPath ($archive[0].FullName + '.sha256')
+          $expected = ($checksum -split '\s+')[0]
+          $actual = (Get-FileHash -LiteralPath $archive[0].FullName -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw 'Windows ZIP checksum mismatch' }
+          Expand-Archive -LiteralPath $archive[0].FullName -DestinationPath artifacts/unpacked
+          $package = @(Get-ChildItem artifacts/unpacked -Directory)
+          if ($package.Count -ne 1) { throw 'Expected one package root' }
+          python tools/release/verify_package.py --root $package[0].FullName --platform windows --smoke
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows packaged tools failed' }
+          Get-ChildItem artifacts/tests -Recurse -File |
+            Where-Object Extension -In '.exe', '.dll' |
+            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $package[0].FullName }
+          & (Join-Path $package[0].FullName 'dw5e_setup_test.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Setup unit tests failed' }
+          & (Join-Path $package[0].FullName 'dw5e_setup_reliability_test.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Setup reliability tests failed' }
+          & (Join-Path $package[0].FullName 'dw5e_safe_read_test.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Snapshot safe-read tests failed' }
+          & (Join-Path $package[0].FullName 'dw5e_dxc_uuid_test.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'DXC interface UUID tests failed' }
+          & (Join-Path $package[0].FullName 'dw5e_kernel_export_test.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Kernel wrapper export link tests failed' }
+
+
   draft:
     name: Update Draft Release
-    needs: [clean-room-check, linux, windows]
+    needs: [clean-room-check, linux, windows, windows-native]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:

@@ -132,6 +132,12 @@ void testRealDiscIfPresent()
     std::cout << "  -> Found " << entries.size() << " files on disc (XGD2 base 0x"
               << std::hex << base << std::dec << ")\n";
 
+    std::cout << "  -> PASS\n";
+}
+
+void testInvalidDisc()
+{
+    std::cout << "[TEST] testInvalidDisc..." << std::endl;
     // Test that a non-Xbox ISO correctly fails checkDiscImage
     fs::path dummyIso = fs::temp_directory_path() / "test_dummy_non_xbox.iso";
     std::ofstream dummy(dummyIso);
@@ -189,6 +195,7 @@ int main(int argc, char **argv)
     fs::remove_all(tempDir, ec);
     fs::create_directories(tempDir, ec);
 
+    testInvalidDisc();
     testSha1();
     testNinjaProgress();
     testInstallState(tempDir);

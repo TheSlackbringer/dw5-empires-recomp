@@ -46,7 +46,11 @@
 #endif
 
 // Define a raw hook with direct ctx/base access.
+#if defined(_WIN32) && defined(rexruntime_EXPORTS)
+#define REX_HOOK_RAW(name) extern "C" __declspec(dllexport) REX_FUNC(name)
+#else
 #define REX_HOOK_RAW(name) extern "C" REX_FUNC(name)
+#endif
 
 // Stub: logs a warning when called.
 #define REX_STUB(subroutine)              \
@@ -68,16 +72,27 @@
     ctx.r3.u64 = (value);                                                                 \
   }
 
+// COFF's automatic DLL export scan skips __imp_* names as import pointers,
+// but our __imp__* symbols are actual PPC ABI wrapper functions.
+#ifdef _WIN32
+#define REX_EXPORT_DECL(name) extern "C" __declspec(dllexport) REX_FUNC(name);
+#else
+#define REX_EXPORT_DECL(name)
+#endif
+
 // Export: hook + register in global registry for kernel ordinal lookup.
 #define REX_EXPORT(name, function) \
+  REX_EXPORT_DECL(name)            \
   REX_HOOK(name, function)         \
   static rex::ppc::detail::PPCFuncRegistrar _ppc_reg_##name(#name, &name);
 
 #define REX_EXPORT_STUB(name) \
+  REX_EXPORT_DECL(name)       \
   REX_STUB(name)              \
   static rex::ppc::detail::PPCFuncRegistrar _ppc_reg_##name(#name, &name);
 
 #define REX_EXPORT_STUB_RETURN(name, retval) \
+  REX_EXPORT_DECL(name)                     \
   REX_STUB_RETURN(name, retval)              \
   static rex::ppc::detail::PPCFuncRegistrar _ppc_reg_##name(#name, &name);
 

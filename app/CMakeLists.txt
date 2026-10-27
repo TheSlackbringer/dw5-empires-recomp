@@ -128,3 +128,33 @@ target_include_directories(dw5e_setup_test PRIVATE
 add_test(NAME setup_unit_tests COMMAND dw5e_setup_test)
 
 
+
+# Standalone lifecycle/recovery fixtures; no game data or visible windows.
+add_executable(dw5e_setup_reliability_test
+    tests/setup_reliability_test.cpp
+    setup/xdvdfs.cpp setup/install_state.cpp setup/setup_layout.cpp
+    setup/build_game.cpp setup/run_process.cpp setup/codegen.cpp setup/setup_pipeline.cpp
+)
+target_include_directories(dw5e_setup_reliability_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(dw5e_setup_reliability_test PRIVATE Threads::Threads)
+add_test(NAME setup_reliability_tests COMMAND dw5e_setup_reliability_test)
+
+add_executable(dw5e_safe_read_test tests/safe_read_test.cpp)
+target_include_directories(dw5e_safe_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME snapshot_safe_read_tests COMMAND dw5e_safe_read_test)
+
+# Compile host diagnostics in CI even when retail game code is unavailable.
+add_library(dw5e_host_portability OBJECT EXCLUDE_FROM_ALL src/dw5e_snapshot.cpp)
+target_link_libraries(dw5e_host_portability PRIVATE rex::runtime)
+rexglue_apply_target_settings(dw5e_host_portability)
+if(WIN32)
+    add_executable(dw5e_dxc_uuid_test tests/dxc_uuid_test.cpp)
+    target_include_directories(dw5e_dxc_uuid_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../rexglue-sdk/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../rexglue-sdk/thirdparty/dxc/include)
+    add_test(NAME dxc_uuid_tests COMMAND dw5e_dxc_uuid_test)
+endif()
+
+add_executable(dw5e_kernel_export_test tests/kernel_export_test.cpp)
+target_link_libraries(dw5e_kernel_export_test PRIVATE rex::runtime)
+add_test(NAME kernel_export_link_tests COMMAND dw5e_kernel_export_test)
