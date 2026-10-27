@@ -24,10 +24,17 @@ class Dw5eApp : public rex::ReXApp {
   // void OnLoadXexImage(std::string& xex_image) override {}
   // void OnPostLoadXexImage() override {}
   void OnPostSetup() override { Dw5eRegisterSnapshotBind(); }
-  // void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {}
-  // std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override;
-  // std::unique_ptr<rex::ui::AchievementNotificationDialog>
-  // CreateAchievementNotificationDialog() override;
-  // void OnShutdown() override {}
-  // void OnConfigurePaths(rex::PathConfig& paths) override {}
+  void OnConfigurePaths(rex::PathConfig& paths) override {
+    if (paths.game_data_root.empty()) {
+      auto exe = rex::filesystem::GetExecutableFolder();
+      auto candidate = exe.parent_path() / "game" / "files";
+      if (std::filesystem::exists(candidate)) {
+        paths.game_data_root = candidate;
+      }
+    }
+    if (paths.user_data_root.empty()) {
+      auto exe = rex::filesystem::GetExecutableFolder();
+      paths.user_data_root = exe.parent_path();
+    }
+  }
 };

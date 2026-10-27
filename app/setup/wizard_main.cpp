@@ -111,16 +111,37 @@ int main(int argc, char **argv)
     };
 
     const auto startGame = [&] {
+        const fs::path gameData = data / "game" / "files";
+        std::vector<std::string> gameArgs = {
+            "--game_data_root=" + gameData.string(),
+            "--user_data_root=" + data.string(),
+            "--cache_root=" + (data / "cache").string(),
+            "--gpu_plugin=xenos"
+        };
+        std::vector<std::pair<std::string, std::string>> env;
 #ifndef _WIN32
+        // Ensure the build directory and local runtime libraries take priority in LD_LIBRARY_PATH
+        std::string ldPath = options.effectiveBuildDir().string() + ":" +
+                             (options.effectiveBuildDir() / "rexglue-sdk" / "src" / "system").string() + ":" +
+                             (options.effectiveBuildDir() / "rexglue-sdk" / "thirdparty").string();
+        if (fs::exists(options.root / "tools" / "clang" / "lib"))
+            ldPath += ":" + (options.root / "tools" / "clang" / "lib").string();
+        if (const char *orig = std::getenv("LD_LIBRARY_PATH"))
+        {
+            if (*orig)
+                ldPath += std::string(":") + orig;
+        }
+        env.emplace_back("LD_LIBRARY_PATH", ldPath);
+
         // Linux: keep launcher process alive while child game runs so AppImage FUSE mount stays mounted
-        const ProcessResult res = runProcess(game, {}, data, data / "logs" / "game.log");
+        const ProcessResult res = runProcess(game, gameArgs, data, data / "logs" / "game.log", nullptr, env);
         if (res.started)
             return res.exitCode;
         std::cerr << "DW5E launcher error: " << res.error << std::endl;
         return 1;
 #else
         std::string err;
-        if (!launchDetached(game, {}, data, err))
+        if (!launchDetached(game, gameArgs, data, err))
         {
             std::cerr << "DW5E launcher error: " << err << std::endl;
             return 1;

@@ -63,9 +63,7 @@ std::vector<std::string> gameConfigureArgs(const fs::path &root,
         "-B", utf8(buildDir),
         "-G", "Ninja",
         "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
-        "-DDW5E_BUILD_GAME=ON",
-        "-DCMAKE_C_FLAGS=-march=x86-64-v2",
-        "-DCMAKE_CXX_FLAGS=-march=x86-64-v2"
+        "-DDW5E_BUILD_GAME=ON"
     };
 
     // If rexglue-sdk is present in root, point to it
@@ -226,6 +224,39 @@ bool buildGame(const fs::path &root,
             return false;
         }
     }
+
+#ifndef _WIN32
+    // Colocate runtime shared libraries next to dw5e so $ORIGIN resolves them directly
+    for (const auto &entry : fs::recursive_directory_iterator(buildDir, ec))
+    {
+        if (entry.is_regular_file(ec))
+        {
+            const std::string name = entry.path().filename().string();
+            if (name.find(".so") != std::string::npos)
+            {
+                const fs::path target = buildDir / entry.path().filename();
+                if (entry.path() != target)
+                    fs::copy_file(entry.path(), target, fs::copy_options::overwrite_existing, ec);
+            }
+        }
+    }
+    const fs::path clangLib = root / "tools" / "clang" / "lib";
+    if (fs::exists(clangLib, ec))
+    {
+        for (const auto &entry : fs::directory_iterator(clangLib, ec))
+        {
+            if (entry.is_regular_file(ec))
+            {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("libc++", 0) == 0 && name.find(".so") != std::string::npos)
+                {
+                    fs::copy_file(entry.path(), buildDir / entry.path().filename(),
+                                  fs::copy_options::overwrite_existing, ec);
+                }
+            }
+        }
+    }
+#endif
 
     return true;
 }
