@@ -108,6 +108,45 @@ jobs:
             dist/*.AppImage
             dist/*.AppImage.sha256
 
+
+  linux-native:
+    name: Clean Linux offline SDK verification
+    needs: linux
+    runs-on: ubuntu-24.04
+    # No host compiler, SDK development packages or Python: use shipped tools.
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download actual AppImage
+        uses: actions/download-artifact@v4
+        with:
+          name: DW5E-linux-x86_64
+          path: artifacts
+      - name: Rebuild SDK with the extracted AppImage toolchain
+        run: |
+          (cd artifacts && sha256sum -c *.AppImage.sha256)
+          set -- artifacts/*.AppImage
+          [ "$#" -eq 1 ]
+          image="$(realpath "$1")"
+          chmod +x "$image"
+          scratch="$(mktemp -d)"
+          cd "$scratch"
+          "$image" --appimage-extract > /dev/null
+          "$scratch/squashfs-root/tools/clang/bin/python3" \
+            "$GITHUB_WORKSPACE/tools/release/verify_package.py" \
+            --root "$scratch/squashfs-root" --platform linux --smoke --build-sdk \
+            --sdk-build-dir "$RUNNER_TEMP/offline-sdk-build"
+      - name: Save offline SDK failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Linux-offline-SDK-diagnostics
+          path: |
+            ${{ runner.temp }}/offline-sdk-build/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ runner.temp }}/offline-sdk-build/CMakeCache.txt
+          if-no-files-found: ignore
+
+
   windows:
     name: Windows Compiler Package
     needs: clean-room-check
@@ -249,7 +288,7 @@ jobs:
 
   draft:
     name: Update Draft Release
-    needs: [clean-room-check, linux, windows, windows-native]
+    needs: [clean-room-check, linux, linux-native, windows, windows-native]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:

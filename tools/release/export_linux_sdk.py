@@ -13,7 +13,9 @@ GLIBC = re.compile(r'^(ld-linux|lib(c|m|dl|pthread|rt|resolv|util|anl|nss_[^.]+)
 SDK_LIBRARY = re.compile(
     r'^(ld-linux|crt|[SMr]?crt|lib(c[.-]|c_nonshared|m[.-]|mvec|dl|pthread|rt[.-]|resolv|util|anl|'
     r'gcc|X|xcb|GL|glapi|EGL|vulkan|asound|pulse|wayland|xkbcommon|drm|ffi|bsd|md[.-]|'
-    r'z[.-]|expat|fontconfig|freetype|dbus|udev|cap[.-]|pcre|systemd))'
+    r'z[.-]|expat|fontconfig|freetype|dbus|udev|cap[.-]|pcre|systemd|gbm|'
+    r'glib|gobject|gmodule|gthread|gio|ibus|pipewire|decor|fribidi|thai|datrie|'
+    r'jack|sndio|usb|unwind|harfbuzz|graphite))'
 )
 
 
@@ -22,10 +24,80 @@ def copy_file(source, target):
     shutil.copy2(source, target)
 
 
+
+def host_dependencies(path):
+    try:
+        linked = subprocess.check_output(["ldd", str(path)], text=True,
+                                         stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as error:
+        if any(message in str(error.output) for message in
+               ("not a dynamic executable", "statically linked")):
+            return set()
+        raise SystemExit(f"cannot inspect Linux tool dependencies for {path}: {error}") from error
+    except OSError as error:
+        raise SystemExit(f"cannot inspect Linux tool dependencies for {path}: {error}") from error
+    missing = re.findall(r"(\S+)\s+=>\s+not found", linked)
+    if missing:
+        raise SystemExit(f"unresolved Linux tool dependencies for {path}: " + ", ".join(missing))
+    return {Path(hit) for hit in re.findall(r"=> (/\S+)", linked)
+            if not GLIBC.match(Path(hit).name)}
+
+
+def copy_target_libraries(sysroot, libraries):
+    """Copy target libraries, their link aliases and complete runtime closure."""
+    pending = list(libraries)
+    copied, inspected, aliases = set(), set(), {}
+    while pending:
+        logical = pending.pop()
+        if logical in copied:
+            continue
+        if not logical.startswith(("/usr/lib/", "/lib/", "/lib64/")):
+            raise SystemExit(f"target SDK library outside system library roots: {logical}")
+        source = Path(logical)
+        if not source.is_file():
+            raise SystemExit(f"unresolved target SDK library: {logical}")
+        copy_file(source, sysroot / logical.lstrip("/"))
+        copied.add(logical)
+        resolved = source.resolve()
+
+        # Keep both SONAME and development names (-lfoo) for each dependency.
+        parent = logical.rsplit("/", 1)[0]
+        if parent not in aliases:
+            index = {}
+            for alias in source.parent.iterdir():
+                if alias.is_file() and ".so" in alias.name:
+                    index.setdefault(alias.resolve(), []).append(parent + "/" + alias.name)
+            aliases[parent] = index
+        pending.extend(aliases[parent].get(resolved, ()))
+
+        if resolved in inspected:
+            continue
+        inspected.add(resolved)
+        with source.open("rb") as stream:
+            if stream.read(4) != b"\x7fELF":
+                # GNU linker scripts and static startup archives still get copied.
+                continue
+        try:
+            linked = subprocess.check_output(["ldd", str(source)], text=True,
+                                             stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as error:
+            if any(message in str(error.output) for message in
+                   ("not a dynamic executable", "statically linked")):
+                continue
+            raise SystemExit(f"cannot inspect target SDK library {logical}: {error}") from error
+        except OSError as error:
+            raise SystemExit(f"cannot inspect target SDK library {logical}: {error}") from error
+        missing = re.findall(r"(\S+)\s+=>\s+not found", linked)
+        if missing:
+            raise SystemExit(f"unresolved target SDK dependencies for {logical}: " +
+                             ", ".join(missing))
+        pending.extend(re.findall(r"=> (/\S+)", linked))
+
+
 def export_sdk(output, cxx=None):
     output.mkdir(parents=True, exist_ok=True)
     programs = {}
-    for name in ['clang', 'ld.lld', 'llvm-ar', 'cmake', 'ninja', 'pkg-config', 'wayland-scanner']:
+    for name in ['clang', 'ld.lld', 'llvm-ar', 'cmake', 'ninja', 'pkg-config', 'wayland-scanner', 'python3']:
         if name in ('clang', 'ld.lld', 'llvm-ar'):
             candidates = [
                 f"/usr/lib/llvm-23/bin/{'lld' if name == 'ld.lld' else name}",
@@ -58,7 +130,7 @@ def export_sdk(output, cxx=None):
             programs['llvm-ar'] = str(p.parent / 'llvm-ar')
             break
 
-    required_tools = {'clang', 'ld.lld', 'llvm-ar', 'cmake', 'ninja', 'pkg-config', 'wayland-scanner'}
+    required_tools = {'clang', 'ld.lld', 'llvm-ar', 'cmake', 'ninja', 'pkg-config', 'wayland-scanner', 'python3'}
     missing = sorted(required_tools - programs.keys())
     if missing:
         raise SystemExit('Linux SDK host tools missing: ' + ', '.join(missing))
@@ -67,18 +139,20 @@ def export_sdk(output, cxx=None):
     for name, path in programs.items():
         target = output / 'cmake/bin/cmake' if name == 'cmake' else output / 'libexec' / name
         copy_file(Path(path), target)
-        try:
-            linked = subprocess.check_output(['ldd', path], text=True)
-            for hit in re.findall(r'=> (/\S+)', linked):
-                library = Path(hit)
-                if not GLIBC.match(library.name):
-                    libraries.add(library)
-        except subprocess.CalledProcessError as exc:
-            if 'not a dynamic executable' not in str(exc.output):
-                raise SystemExit(f'cannot inspect Linux tool dependencies for {path}: {exc}') from exc
-        except OSError as exc:
-            raise SystemExit(f'cannot inspect Linux tool dependencies for {path}: {exc}') from exc
+        libraries.update(host_dependencies(path))
 
+    # glslang generates its build information with Python. Ship that build tool
+    # and its standard library instead of depending on the player's Python.
+    python_stdlib = Path(subprocess.check_output(
+        [programs['python3'], '-c', 'import sysconfig; print(sysconfig.get_path("stdlib"))'],
+        text=True).strip())
+    if not python_stdlib.is_dir() or not re.fullmatch(r'python3\.\d+', python_stdlib.name):
+        raise SystemExit(f'cannot locate the SDK Python standard library: {python_stdlib}')
+    shutil.copytree(python_stdlib, output / 'lib' / python_stdlib.name,
+                    dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
+    for extension in python_stdlib.rglob('*.so'):
+        if extension.is_file():
+            libraries.update(host_dependencies(extension))
     for library in libraries:
         copy_file(library, output / 'host-libs' / library.name)
 
@@ -120,10 +194,18 @@ def export_sdk(output, cxx=None):
     # the player's C development headers, startup objects and linker scripts.
     sysroot = output / 'sysroot'
     shutil.copytree(Path('/usr/include'), sysroot / 'usr/include', dirs_exist_ok=True)
+    target_libraries = []
     for directory in ('usr/lib/x86_64-linux-gnu', 'lib/x86_64-linux-gnu'):
-        for source in Path('/' + directory).iterdir():
+        base = Path('/' + directory)
+        for source in base.iterdir():
             if source.is_file() and SDK_LIBRARY.match(source.name):
-                copy_file(source, sysroot / directory / source.name)
+                target_libraries.append('/' + directory + '/' + source.name)
+        # pkg-config includes target-generated headers here, outside /usr/include.
+        for headers in base.rglob('include'):
+            if headers.is_dir():
+                shutil.copytree(headers, sysroot / directory / headers.relative_to(base),
+                                dirs_exist_ok=True)
+    copy_target_libraries(sysroot, target_libraries)
     for version in Path('/usr/lib/gcc/x86_64-linux-gnu').glob('*'):
         if version.is_dir():
             for source in version.iterdir():
@@ -163,6 +245,11 @@ case "$tool" in
   clang|clang++)
     exec "$sdk/libexec/$tool" --sysroot="$sdk/sysroot" --gcc-toolchain="$sdk/sysroot/usr" \\
       -resource-dir="$sdk/lib/clang/@RESOURCE_VERSION@" -L"$sdk/lib" "$@" ;;
+  python3)
+    unset PYTHONPATH
+    export PYTHONHOME="$sdk"
+    export PYTHONNOUSERSITE=1
+    export PYTHONDONTWRITEBYTECODE=1 ;;
   pkg-config)
     export PKG_CONFIG_SYSROOT_DIR="$sdk/sysroot"
     export PKG_CONFIG_LIBDIR="$sdk/sysroot/usr/lib/x86_64-linux-gnu/pkgconfig:$sdk/sysroot/usr/share/pkgconfig" ;;

@@ -29,22 +29,28 @@ def validate_package(root, windows):
             "tools/clang/bin/clang", "tools/clang/bin/clang++",
             "tools/clang/bin/llvm-ar", "tools/clang/bin/llvm-ranlib",
             "tools/clang/bin/ld.lld", "tools/clang/bin/pkg-config",
-            "tools/clang/bin/wayland-scanner", "tools/clang/sysroot/usr/include/stdlib.h",
+            "tools/clang/bin/wayland-scanner", "tools/clang/bin/python3",
+            "tools/clang/libexec/python3", "tools/clang/sysroot/usr/include/stdlib.h",
             "tools/clang/sysroot/usr/lib/x86_64-linux-gnu/crt1.o",
+            "tools/clang/sysroot/usr/lib/x86_64-linux-gnu/dbus-1.0/include/dbus/dbus-arch-deps.h",
+            "tools/clang/sysroot/usr/lib/x86_64-linux-gnu/glib-2.0/include/glibconfig.h",
             "tools/clang/sysroot/lib64/ld-linux-x86-64.so.2",
         ]
     missing = [name for name in required if not (root / name).is_file()]
+    if not windows and not any((root / "tools/clang/lib").glob("python3.*/os.py")):
+        missing.append("tools/clang/lib/python3.*/os.py")
     if missing:
         raise SystemExit("incomplete builder package; required files missing:\n  " +
                          "\n  ".join(missing))
 
 
-def smoke_package(root, windows):
-    if windows != (os.name == "nt"):
-        raise SystemExit("native tool smoke checks must run on the target operating system")
-    root = Path(root).resolve()
+def package_environment(root, windows):
     tools = root / "tools"
     env = os.environ.copy()
+    # The release compiler must not inherit target headers/libraries from the host.
+    for variable in ("CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "LIBRARY_PATH",
+                     "PKG_CONFIG_PATH", "CMAKE_PREFIX_PATH", "PYTHONPATH", "PYTHONHOME"):
+        env.pop(variable, None)
     compiler_root = tools / ("llvm-mingw" if windows else "clang")
     if windows:
         system = Path(os.environ["SystemRoot"])
@@ -56,6 +62,16 @@ def smoke_package(root, windows):
         env["LD_LIBRARY_PATH"] = ":".join(map(str, [
             tools, root / "usr/lib", compiler_root / "host-libs", compiler_root / "lib",
         ]))
+    return env
+
+
+def smoke_package(root, windows):
+    if windows != (os.name == "nt"):
+        raise SystemExit("native tool smoke checks must run on the target operating system")
+    root = Path(root).resolve()
+    tools = root / "tools"
+    env = package_environment(root, windows)
+    compiler_root = tools / ("llvm-mingw" if windows else "clang")
     suffix = ".exe" if windows else ""
     cmake = tools / f"cmake/bin/cmake{suffix}"
 
@@ -94,17 +110,72 @@ def smoke_package(root, windows):
     print("PASS: packaged translator and offline build tools", flush=True)
 
 
+def build_linux_sdk(root, build=None):
+    """Rebuild the packaged SDK with its own exported compiler and sysroot."""
+    if os.name == "nt":
+        raise SystemExit("the Linux SDK rebuild check requires a Linux runner")
+    root = Path(root).resolve()
+    compiler = root / "tools/clang"
+    env = package_environment(root, False)
+    # Match a player launching DW5E without development tools on PATH. The
+    # toolchain itself must select its scanner, pkg-config and Python.
+    env["PATH"] = "/usr/bin:/bin"
+    build = Path(build or tempfile.mkdtemp(prefix="dw5e-sdk-build-")).resolve()
+    if build.exists() and any(build.iterdir()):
+        raise SystemExit(f"SDK verification requires a fresh build directory: {build}")
+    build.mkdir(parents=True, exist_ok=True)
+    cmake = root / "tools/cmake/bin/cmake"
+
+    def run(command, run_env=env, cwd=build):
+        print("+", " ".join(map(str, command)), flush=True)
+        subprocess.run(list(map(str, command)), cwd=cwd, env=run_env,
+                       check=True, timeout=1800)
+
+    print(f"Offline SDK rebuild evidence: {build}", flush=True)
+    run([cmake, "-S", root / "app", "-B", build, "-G", "Ninja",
+         f"-DCMAKE_MAKE_PROGRAM={root / 'tools/ninja'}",
+         f"-DCMAKE_TOOLCHAIN_FILE={root / 'tools/linux/clang.cmake'}",
+         f"-DDW5E_LINUX_TOOLCHAIN_ROOT={compiler}",
+         f"-DREXSDK_DIR={root / 'rexglue-sdk'}", "-DDW5E_BUILD_GAME=OFF",
+         "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+         "-DFETCHCONTENT_FULLY_DISCONNECTED=ON",
+         "-DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF",
+         "-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF"])
+    tests = ["dw5e_setup_test", "dw5e_setup_reliability_test",
+             "dw5e_safe_read_test", "dw5e_kernel_export_test", "dw5e_gpu_plugin_test"]
+    run([cmake, "--build", build, "--target", "dw5e_setup", "dw5e_host_portability",
+         "rexglue", *tests, "--parallel", str(os.cpu_count() or 1)])
+    # Prefer the newly built runtime over the prebuilt AppImage runtime.
+    run_env = env.copy()
+    run_env["LD_LIBRARY_PATH"] = ":".join(map(str, [
+        build, build / "rexglue-sdk/src/system", build / "rexglue-sdk/thirdparty",
+        env["LD_LIBRARY_PATH"],
+    ]))
+    for test in tests:
+        run([build / test], run_env=run_env)
+    print("PASS: actual packaged Linux SDK rebuild and native tests", flush=True)
+    # Keep the build tree/logs; do not remove build directories containing _deps.
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--platform", choices=("windows", "linux"), required=True)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--build-sdk", action="store_true",
+                        help="rebuild the actual Linux SDK using packaged tools, without game data")
+    parser.add_argument("--sdk-build-dir", type=Path,
+                        help="fresh directory for retained SDK rebuild evidence")
     args = parser.parse_args()
     windows = args.platform == "windows"
     validate_package(args.root, windows)
     print("PASS: required builder package files", flush=True)
     if args.smoke:
         smoke_package(args.root, windows)
+    if args.build_sdk:
+        if windows:
+            raise SystemExit("--build-sdk currently verifies Linux packages")
+        build_linux_sdk(args.root, args.sdk_build_dir)
 
 
 if __name__ == "__main__":
