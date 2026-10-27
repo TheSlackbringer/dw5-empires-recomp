@@ -29,14 +29,18 @@ class GitHub:
         command = ['gh', 'api', '--method', method]
         if paginate:
             command += ['--paginate', '--slurp']
+        if payload is not None:
+            command += ['--input', '-']
         command.append(f'repos/{self.repo}/{path}')
         result = subprocess.run(
             command,
             input=json.dumps(payload) if payload is not None else None,
             capture_output=True,
             text=True,
-            check=True
         )
+        if result.returncode != 0:
+            sys.stderr.write(f"GitHub API {method} {path} failed (exit {result.returncode}):\n{result.stderr}\n")
+            result.check_returncode()
         return json.loads(result.stdout) if result.stdout.strip() else None
 
     def releases(self):
@@ -58,11 +62,15 @@ class GitHub:
 
     def upload(self, release_id, files):
         release = self.require_draft(release_id)
-        subprocess.run(
+        result = subprocess.run(
             ['gh', 'release', 'upload', release['tag_name'], *map(str, files),
              '--repo', self.repo, '--clobber'],
-            check=True
+            capture_output=True,
+            text=True,
         )
+        if result.returncode != 0:
+            sys.stderr.write(f"gh release upload failed (exit {result.returncode}):\n{result.stderr}\n")
+            result.check_returncode()
 
     def delete_asset(self, release_id, asset_id):
         self.require_draft(release_id)
@@ -94,6 +102,7 @@ def package_for_version(source, version):
         raise ValueError(f'unknown builder package: {source.name}')
     target = source.with_name(f'DW5E-{version}-{suffix}')
     if target != source:
+        Path(str(source) + '.sha256').unlink(missing_ok=True)
         source.rename(target)
     checksum = Path(str(target) + '.sha256')
     h = hashlib.sha256()
