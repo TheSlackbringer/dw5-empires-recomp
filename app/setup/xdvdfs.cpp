@@ -210,7 +210,7 @@ bool checkDiscImage(const std::filesystem::path &isoPath,
     int64_t base = detectPartitionBase(stream);
     if (base < 0)
     {
-        error = "not a valid Xbox 360 disc image (no XDVDFS filesystem found)";
+        error = "not a valid Xbox 360 disc image";
         return false;
     }
 
@@ -222,7 +222,7 @@ bool checkDiscImage(const std::filesystem::path &isoPath,
     uint8_t rootDesc[8];
     if (!stream.read(reinterpret_cast<char *>(rootDesc), 8))
     {
-        error = "failed to read XDVDFS root descriptor";
+        error = "failed to read disc root descriptor";
         return false;
     }
 
@@ -247,13 +247,13 @@ bool checkDiscImage(const std::filesystem::path &isoPath,
 
     if (!foundXex)
     {
-        error = "valid XDVDFS filesystem found, but default.xex is missing";
+        error = "valid Xbox 360 disc image, but default.xex is missing";
         return false;
     }
 
     if (!foundLinkData)
     {
-        error = "disc is an Xbox 360 image, but not Dynasty Warriors 5: Empires (LINKDATA.BIN missing)";
+        error = "disc is an Xbox 360 image, but not Dynasty Warriors 5: Empires";
         return false;
     }
 
