@@ -170,6 +170,10 @@ add_custom_command(TARGET dw5e_gpu_plugin_test POST_BUILD
         $<TARGET_FILE_DIR:dw5e_gpu_plugin_test>
     VERBATIM)
 if(WIN32)
+    if(MINGW)
+        # Like the game host, initialize the Unicode CRT executable path.
+        target_link_options(dw5e_gpu_plugin_test PRIVATE -municode)
+    endif()
     add_custom_command(TARGET dw5e_gpu_plugin_test POST_BUILD
         COMMAND "$<$<BOOL:$<TARGET_RUNTIME_DLLS:dw5e_gpu_plugin_test>>:${CMAKE_COMMAND};-E;copy_if_different;$<TARGET_RUNTIME_DLLS:dw5e_gpu_plugin_test>;$<TARGET_FILE_DIR:dw5e_gpu_plugin_test>>"
         COMMAND_EXPAND_LISTS
