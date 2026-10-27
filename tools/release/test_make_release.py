@@ -7,6 +7,7 @@ from unittest.mock import patch
 import zipfile
 
 import make_release as release
+import export_linux_sdk as sdk
 
 
 class WindowsPackageTest(unittest.TestCase):
@@ -104,6 +105,36 @@ class WindowsPackageTest(unittest.TestCase):
         self.write_zip(self.archives["CMAKE_WIN_ZIP"], {"cmake/readme.txt": b"no tool"})
         with self.assertRaisesRegex(SystemExit, "(?i)cmake"):
             self.package()
+
+
+class LinuxRuntimeTest(unittest.TestCase):
+    def test_linux_runtime_closure_includes_libraries_linuxdeploy_omitted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            x11 = root / "libX11-xcb.so.1"
+            xcb = root / "libxcb.so.1"
+            libc = root / "libc.so.6"
+            for path in (x11, xcb, libc):
+                path.write_text("SDK " + path.name)
+            stage = root / "stage"
+            with patch.object(sdk, "host_dependencies", return_value={x11, xcb, libc}):
+                release.bundle_linux_runtime(stage, [root / "rexglue"], {})
+            self.assertEqual((stage / "usr/lib/libX11-xcb.so.1").read_text(), x11.read_text())
+            self.assertEqual((stage / "usr/lib/libxcb.so.1").read_text(), xcb.read_text())
+            self.assertFalse((stage / "usr/lib/libc.so.6").exists())
+
+    def test_linux_runtime_closure_preserves_linuxdeploy_patched_libraries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "libxcb.so.1"
+            source.write_text("original SDK binary")
+            stage = root / "stage"
+            (stage / "usr/lib").mkdir(parents=True)
+            target = stage / "usr/lib/libxcb.so.1"
+            target.write_text("linuxdeploy RPATH-patched binary")
+            with patch.object(sdk, "host_dependencies", return_value={source}):
+                release.bundle_linux_runtime(stage, [root / "rexglue"], {})
+            self.assertEqual(target.read_text(), "linuxdeploy RPATH-patched binary")
 
 
 class DependencyTest(unittest.TestCase):

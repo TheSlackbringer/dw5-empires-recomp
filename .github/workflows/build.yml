@@ -135,15 +135,17 @@ jobs:
           "$scratch/squashfs-root/tools/clang/bin/python3" \
             "$GITHUB_WORKSPACE/tools/release/verify_package.py" \
             --root "$scratch/squashfs-root" --platform linux --smoke --build-sdk \
-            --sdk-build-dir "$RUNNER_TEMP/offline-sdk-build"
+            --sdk-build-dir "$GITHUB_WORKSPACE/.ci/offline-sdk-build"
       - name: Save offline SDK failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: Linux-offline-SDK-diagnostics
           path: |
-            ${{ runner.temp }}/offline-sdk-build/CMakeFiles/CMakeConfigureLog.yaml
-            ${{ runner.temp }}/offline-sdk-build/CMakeCache.txt
+            .ci/offline-sdk-build/CMakeFiles/CMakeConfigureLog.yaml
+            .ci/offline-sdk-build/CMakeFiles/CMakeOutput.log
+            .ci/offline-sdk-build/CMakeFiles/CMakeError.log
+            .ci/offline-sdk-build/CMakeCache.txt
           if-no-files-found: ignore
 
 

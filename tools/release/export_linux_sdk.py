@@ -25,10 +25,10 @@ def copy_file(source, target):
 
 
 
-def host_dependencies(path):
+def host_dependencies(path, env=None):
     try:
         linked = subprocess.check_output(["ldd", str(path)], text=True,
-                                         stderr=subprocess.STDOUT)
+                                         stderr=subprocess.STDOUT, env=env)
     except subprocess.CalledProcessError as error:
         if any(message in str(error.output) for message in
                ("not a dynamic executable", "statically linked")):

@@ -13,6 +13,8 @@ import subprocess
 import sys
 import zipfile
 
+import export_linux_sdk
+
 from verify_package import validate_package
 
 REPO = Path(__file__).resolve().parents[2]
@@ -339,6 +341,23 @@ def windows(build, recomp_build, test):
     return archive
 
 
+
+def bundle_linux_runtime(stage, binaries, env):
+    """Fill linuxdeploy's excluded desktop dependencies without replacing glibc."""
+    target = stage / 'usr/lib'
+    target.mkdir(parents=True, exist_ok=True)
+    libraries = set()
+    for binary in binaries:
+        libraries.update(export_linux_sdk.host_dependencies(binary, env=env))
+    for library in sorted(libraries):
+        if export_linux_sdk.GLIBC.match(library.name):
+            continue
+        destination = target / library.name
+        # Keep any RPATH edits linuxdeploy already made to its own copies.
+        if not destination.exists():
+            shutil.copy2(library, destination)
+
+
 def linux(build, recomp_build, sdk, appimage_tools, test):
     launcher = build / 'DW5E'
     if not launcher.exists():
@@ -434,6 +453,13 @@ def linux(build, recomp_build, sdk, appimage_tools, test):
         '-i', str(icon)
     ]
     subprocess.run(linuxdeploy_cmd, env=env, check=True)
+
+    # The recompiler must work on a clean host too. linuxdeploy intentionally
+    # excludes some X11 desktop libraries that its runtime still imports.
+    runtime_inputs = [launcher, recompiler]
+    runtime_inputs.extend(so for so in so_candidates if so.is_file())
+    runtime_inputs.extend(lib for lib in (sdk / 'lib').glob('*.so*') if lib.is_file())
+    bundle_linux_runtime(stage, runtime_inputs, env)
 
     app_run = stage / 'AppRun'
     app_run.unlink(missing_ok=True)
