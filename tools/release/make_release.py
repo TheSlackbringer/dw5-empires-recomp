@@ -185,7 +185,7 @@ def scan(stage, windows=True):
         name = p.name
         if windows and any(c in name for c in '<>:"|?*\\'):
             bad.append(f'{rel} (character not allowed on Windows)')
-        if p.is_dir():
+        if p.is_dir() or not p.exists():
             continue
         low = rel.lower()
         if (name.upper() in FORBIDDEN_FILES or
@@ -331,11 +331,19 @@ def linux(build, recomp_build, sdk, appimage_tools, test):
         (stage / 'tools/rexglue').chmod(0o755)
 
     # Copy recompiler shared libraries into usr/lib and tools
-    sdk_out = REPO / 'rexglue-sdk/out/linux-amd64'
-    if sdk_out.exists():
-        for so in sdk_out.glob('*.so*'):
+    so_candidates = []
+    for d in (build, recomp_build, REPO / 'rexglue-sdk/out/linux-amd64', REPO / 'rexglue-sdk/out/linux-amd64/RelWithDebInfo'):
+        if d.exists():
+            so_candidates.extend(d.glob('**/*.so*'))
+
+    extra_libs = []
+    seen = set()
+    for so in so_candidates:
+        if so.is_file() and not so.is_symlink() and so.name not in seen:
+            seen.add(so.name)
             shutil.copy2(so, stage / 'usr/lib' / so.name)
             shutil.copy2(so, stage / 'tools' / so.name)
+            extra_libs.extend(['-l', str(so)])
 
     # Bundle offline SDK
     shutil.copytree(sdk, stage / 'tools/clang', symlinks=True)
@@ -356,15 +364,18 @@ def linux(build, recomp_build, sdk, appimage_tools, test):
 
     icon = REPO / 'tools/release/dw5e.svg'
     desktop = REPO / 'tools/release/dw5e.desktop'
-    env = {**os.environ, 'APPIMAGE_EXTRACT_AND_RUN': '1', 'ARCH': 'x86_64', 'NO_STRIP': '1', 'LD_LIBRARY_PATH': str(stage / 'usr/lib')}
+    ld_path = f"{stage / 'usr/lib'}:{build / 'rexglue-sdk/src/system'}:{os.environ.get('LD_LIBRARY_PATH', '')}"
+    env = {**os.environ, 'APPIMAGE_EXTRACT_AND_RUN': '1', 'ARCH': 'x86_64', 'NO_STRIP': '1', 'LD_LIBRARY_PATH': ld_path}
 
-    subprocess.run([
+    linuxdeploy_cmd = [
         str(appimage_tools / 'linuxdeploy-x86_64.AppImage'),
         '--appdir', str(stage),
         '-e', str(stage / 'DW5E'),
+        *extra_libs,
         '-d', str(desktop),
         '-i', str(icon)
-    ], env=env, check=True)
+    ]
+    subprocess.run(linuxdeploy_cmd, env=env, check=True)
 
     app_run = stage / 'AppRun'
     app_run.unlink(missing_ok=True)

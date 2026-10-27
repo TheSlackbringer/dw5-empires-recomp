@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   clean-room-check:
@@ -30,7 +31,11 @@ jobs:
     name: Linux AppImage
     needs: clean-room-check
     runs-on: ubuntu-24.04
-    container: ghcr.io/theslackbringer/dw5xl-release-linux@sha256:e8acf93dc99a7c16e906ccf916e40a338e2b890fc1a5280caf2e333a8f441149
+    container:
+      image: ghcr.io/theslackbringer/dw5e-release-linux:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 

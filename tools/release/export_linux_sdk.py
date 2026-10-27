@@ -26,9 +26,17 @@ def export_sdk(output, cxx=None):
     output.mkdir(parents=True, exist_ok=True)
     programs = {}
     for name in ['clang', 'ld.lld', 'llvm-ar', 'cmake', 'ninja', 'pkg-config']:
-        which = shutil.which(name)
-        if which:
-            programs[name] = which
+        candidates = [
+            name,
+            f"{name}-23",
+            f"/usr/lib/llvm-23/bin/{name}",
+            f"/usr/lib/llvm-23/bin/{'lld' if name == 'ld.lld' else name}",
+        ]
+        for cand in candidates:
+            which = shutil.which(cand) or (cand if Path(cand).is_file() else None)
+            if which:
+                programs[name] = str(which)
+                break
 
     if not programs.get('clang'):
         # Search common llvm locations
