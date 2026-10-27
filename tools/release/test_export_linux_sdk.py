@@ -1,11 +1,15 @@
 """Synthetic host filesystem tests for the offline Linux SDK exporter."""
 from contextlib import contextmanager
 from pathlib import Path
+import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import export_linux_sdk as sdk
+import verify_package
 
 
 @contextmanager
@@ -55,12 +59,35 @@ def exported_sdk(extra_files=None, linked=None):
 
         with patch.object(sdk, "Path", side_effect=host_path), \
              patch.object(sdk.shutil, "which", side_effect=which), \
-             patch.object(sdk.subprocess, "check_output", side_effect=ldd):
-            sdk.export_sdk(output)
+             patch.object(sdk.subprocess, "check_output", side_effect=ldd), \
+             patch.object(sdk.subprocess, "run") as patch_binary:
+            # Fixture ELF bytes are synthetic; record the packaging-tool call.
+            # Real ELF relocation and CMake self-exec run in package --smoke.
+            sdk.export_sdk(output, patchelf="fixture-patchelf")
         yield output, files
 
 
 class LinuxSdkTest(unittest.TestCase):
+    def test_package_verifier_does_not_export_sdk_host_libraries(self):
+        root = Path("/synthetic/release")
+        env = verify_package.package_environment(root, False)
+        self.assertNotIn(str(root / "tools/clang/host-libs"),
+                         env["LD_LIBRARY_PATH"].split(":"))
+
+    @unittest.skipIf(os.name == "nt", "Linux ELF tool execution")
+    def test_tool_libraries_do_not_escape_into_host_subprocesses(self):
+        with exported_sdk() as (output, _):
+            # A real ELF tool that starts a host child. No compiler or retail data.
+            shutil.copy2("/bin/sh", output / "libexec/ninja")
+            (output / "host-libs").mkdir(exist_ok=True)
+            env = os.environ.copy()
+            original = str(output.parent / "inherited-libraries")
+            env["LD_LIBRARY_PATH"] = original
+            child = subprocess.run(
+                [str(output / "bin/ninja"), "-c", '/bin/sh -c \'printf "%s" "$LD_LIBRARY_PATH"\''],
+                env=env, text=True, capture_output=True, check=True)
+            self.assertEqual(child.stdout, original)
+
     def test_export_includes_c_headers_startup_objects_and_link_libraries(self):
         with exported_sdk() as (output, files):
             for name in ("usr/include/stdio.h", "usr/lib/x86_64-linux-gnu/crt1.o",

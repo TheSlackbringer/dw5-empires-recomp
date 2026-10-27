@@ -66,10 +66,6 @@ jobs:
         run: |
           ctest --test-dir app/build-linux --output-on-failure
 
-      - name: Export relocatable Linux SDK
-        run: |
-          python3 tools/release/export_linux_sdk.py --output dist/sdk --cxx /tmp/cxx
-
       - name: Download AppImage packaging tools
         run: |
           mkdir -p /opt/appimage-tools
@@ -78,6 +74,14 @@ jobs:
           curl -sLo /opt/appimage-tools/appimagetool-x86_64.AppImage \
             https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x /opt/appimage-tools/*.AppImage
+
+      - name: Export relocatable Linux SDK
+        run: |
+          mkdir -p dist/packaging-tools
+          (cd dist/packaging-tools && /opt/appimage-tools/linuxdeploy-x86_64.AppImage \
+            --appimage-extract usr/bin/patchelf > /dev/null)
+          python3 tools/release/export_linux_sdk.py --output dist/sdk --cxx /tmp/cxx \
+            --patchelf "$PWD/dist/packaging-tools/squashfs-root/usr/bin/patchelf"
 
       - name: Package Linux AppImage
         env:

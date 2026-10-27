@@ -169,21 +169,8 @@ int main(int argc, char **argv)
         options.tools = layout.tools;
     }
 
-#ifndef _WIN32
-    // Linux AppImage FUSE mount stability (commit 553f229)
-    if (!release.empty() && layoutError.empty())
-    {
-        fs::path cached;
-        if (prepareLinuxBuildRoot(root, data, cached, layoutError) &&
-            findLayout(cached, false, layout, layoutError))
-        {
-            options.root = cached;
-            options.recompiler = layout.recompiler;
-            options.tools = layout.tools;
-        }
-    }
-#endif
-
+    // Keep the package root in the idle/retry UI. Each SetupRun restores its
+    // stable Linux builder before using it, even if player data was deleted.
     options.rebuild = args.rebuild;
     if (!args.iso.empty())
         options.discIso = args.iso;

@@ -94,7 +94,33 @@ def copy_target_libraries(sysroot, libraries):
         pending.extend(re.findall(r"=> (/\S+)", linked))
 
 
-def export_sdk(output, cxx=None):
+def isolate_host_runtime(output, patchelf=None):
+    """Give every native tool its private dependencies, including on self-exec."""
+    candidates = list((output / 'libexec').iterdir())
+    candidates += list((output / 'cmake/bin').iterdir())
+    candidates += list((output / 'host-libs').glob('*'))
+    candidates += list((output / 'lib').glob('*.so*'))
+    candidates += list((output / 'lib').glob('python*/lib-dynload/*.so'))
+    for path in candidates:
+        if path.is_symlink() or not path.is_file():
+            continue
+        with path.open('rb') as stream:
+            if stream.read(4) != b'\x7fELF':
+                continue
+        patcher = patchelf or shutil.which('patchelf')
+        if not patcher:
+            raise SystemExit('Linux SDK runtime isolation requires --patchelf '
+                             '(available in the existing linuxdeploy AppImage)')
+        directories = (output / 'host-libs', output / 'lib')
+        rpath = ':'.join('$ORIGIN/' + os.path.relpath(directory, path.parent)
+                         for directory in directories)
+        # DT_RPATH covers transitive imports in this process, never child tools
+        # such as the player's /bin/sh. Core glibc remains supplied by the host.
+        subprocess.run([str(patcher), '--force-rpath', '--set-rpath', rpath, str(path)],
+                       check=True)
+
+
+def export_sdk(output, cxx=None, patchelf=None):
     output.mkdir(parents=True, exist_ok=True)
     programs = {}
     for name in ['clang', 'ld.lld', 'llvm-ar', 'cmake', 'ninja', 'pkg-config', 'wayland-scanner', 'python3']:
@@ -229,6 +255,7 @@ def export_sdk(output, cxx=None):
         raise SystemExit('Clang resource headers are missing from the exported Linux SDK')
     resource_version = versions[-1]
 
+    isolate_host_runtime(output, patchelf)
 
     bin_dir = output / 'bin'
     bin_dir.mkdir(exist_ok=True)
@@ -237,7 +264,8 @@ def export_sdk(output, cxx=None):
 set -eu
 tool=$(basename "$0")
 sdk=$(dirname "$(dirname "$(readlink -f "$0")")")
-export LD_LIBRARY_PATH="$sdk/host-libs:$sdk/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Native tools carry relative RPATHs. Do not export SDK libraries into host
+# subprocesses: CMake/Ninja also start the player's /bin/sh.
 export PATH="$sdk/bin:$sdk/libexec:$PATH"
 case "$tool" in
   cmake)
@@ -273,5 +301,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--cxx', type=Path, default=None)
+    parser.add_argument('--patchelf', type=Path, default=None,
+                        help='existing patchelf, also bundled inside linuxdeploy')
     args = parser.parse_args()
-    export_sdk(args.output, args.cxx)
+    export_sdk(args.output, args.cxx, args.patchelf)

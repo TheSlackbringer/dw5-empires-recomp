@@ -60,7 +60,7 @@ def package_environment(root, windows):
     else:
         env["PATH"] = f"{compiler_root}/bin:/usr/bin:/bin"
         env["LD_LIBRARY_PATH"] = ":".join(map(str, [
-            tools, root / "usr/lib", compiler_root / "host-libs", compiler_root / "lib",
+            tools, root / "usr/lib",
         ]))
     return env
 
@@ -93,6 +93,7 @@ def smoke_package(root, windows):
             "project(package_smoke LANGUAGES C CXX)\n"
             "set(CMAKE_CXX_STANDARD 23)\n"
             "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n"
+            "file(GLOB smoke_sources CONFIGURE_DEPENDS main.cpp)\n"
             "add_executable(package_smoke main.cpp)\n", encoding="utf-8")
         (source / "main.cpp").write_text(
             '#include <filesystem>\n#include <iostream>\n#include <vector>\n'

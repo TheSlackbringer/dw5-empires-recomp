@@ -156,6 +156,24 @@ void SetupRun::run()
     fs::create_directories(dataDir, ec);
     fs::create_directories(logDir, ec);
 
+#ifndef _WIN32
+    if (fs::is_regular_file(m_options.root / "BUILD_ID", ec))
+    {
+        fs::path cached;
+        SetupLayout layout;
+        std::string error;
+        if (!prepareLinuxBuildRoot(m_options.root, dataDir, cached, error) ||
+            !findLayout(cached, false, layout, error))
+        {
+            fail("Cannot prepare build tools: " + error);
+            return;
+        }
+        m_options.root = cached;
+        m_options.recompiler = layout.recompiler;
+        m_options.tools = layout.tools;
+    }
+#endif
+
     // Determine plan
     std::string problem;
     const bool isInstalled = (installState(dataDir, &problem) == InstallState::Installed);

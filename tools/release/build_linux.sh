@@ -13,6 +13,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${DW5E_LINUX_BUILD_DIR:-$REPO_ROOT/app/out/build/linux-amd64-relwithdebinfo}"
 DIST_DIR="${DW5E_DIST_DIR:-$REPO_ROOT/dist}"
 SDK_DIR="${DW5E_SDK_DIR:-$DIST_DIR/sdk}"
+APPIMAGE_TOOLS_DIR="${DW5E_APPIMAGE_TOOLS:-$HOME/.local/opt/appimage-tools}"
 
 RUN_TESTS=false
 TEST_ISO=""
@@ -51,13 +52,18 @@ fi
 
 if [ ! -f "$SDK_DIR/bin/clang++" ]; then
     echo "==> Exporting relocatable Linux SDK..."
-    python3 "$REPO_ROOT/tools/release/export_linux_sdk.py" --output "$SDK_DIR"
+    mkdir -p "$DIST_DIR/packaging-tools"
+    (cd "$DIST_DIR/packaging-tools" && "$APPIMAGE_TOOLS_DIR/linuxdeploy-x86_64.AppImage" \
+        --appimage-extract usr/bin/patchelf > /dev/null)
+    python3 "$REPO_ROOT/tools/release/export_linux_sdk.py" --output "$SDK_DIR" \
+        --patchelf "$DIST_DIR/packaging-tools/squashfs-root/usr/bin/patchelf"
 fi
 
 echo "==> Creating clean-room Linux AppImage package..."
 python3 "$REPO_ROOT/tools/release/make_release.py" linux \
     --build "$BUILD_DIR" \
-    --linux-sdk "$SDK_DIR"
+    --linux-sdk "$SDK_DIR" \
+    --appimage-tools "$APPIMAGE_TOOLS_DIR"
 
 if [ -n "$TEST_ISO" ]; then
     APPIMAGE=$(find "$DIST_DIR" -maxdepth 1 -name "DW5E-*-linux-x86_64.AppImage" | head -n 1)

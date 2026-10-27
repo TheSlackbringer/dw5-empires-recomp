@@ -191,6 +191,40 @@ int main(int argc, char **argv)
           "Windows player build stages compiler runtime DLLs beside the game");
 #endif
 
+#ifndef _WIN32
+    // The UI keeps the package as its source while the player can reset data.
+    const fs::path retryPackage = scratch / "retry-package";
+    write(retryPackage / "BUILD_ID", "retry-release\n");
+    write(retryPackage / "app/CMakeLists.txt", "# synthetic package\n");
+    for (const char *tool : {"tools/rexglue", "tools/cmake/bin/cmake"})
+    {
+        const fs::path dest = retryPackage / tool;
+        fs::create_directories(dest.parent_path());
+        fs::copy_file(self, dest);
+    }
+    write(retryPackage / "tools/ninja", "synthetic tool discovery fixture");
+    write(retryPackage / "tools/clang/bin/clang++", "synthetic tool discovery fixture");
+    const fs::path retryData = scratch / "retry-data";
+    fs::path idleCached;
+    check(prepareLinuxBuildRoot(retryPackage, retryData, idleCached, error),
+          "release builder is staged before the idle-window reset fixture");
+    fs::remove_all(retryData); // Only this test's scratch, without a build/_deps tree.
+    write(retryData / "game/files/default.xex", "synthetic installed input; never parsed");
+    writeInstallMarker(retryData, kExpectedDiscSha1, error);
+    SetupOptions retryOptions;
+    retryOptions.root = retryPackage;
+    retryOptions.dataDir = retryData;
+    retryOptions.recompiler = idleCached / "tools/rexglue";
+    retryOptions.tools.cmake = idleCached / "tools/cmake/bin/cmake";
+    SetupRun retry(retryOptions);
+    retry.start();
+    const bool recovered = retry.wait();
+    check(recovered && retry.status().finished &&
+          fs::is_regular_file(idleCached / "tools/rexglue") &&
+          fs::exists(retry.status().executable),
+          "same-window setup restores a deleted data/builder directory before codegen");
+#endif
+
     std::error_code cleanupError;
     fs::remove_all(scratch, cleanupError);
     std::cout << (failures ? "FAIL" : "PASS") << ": " << failures << " failed checks\n";
