@@ -3,7 +3,14 @@
 
 #include <chrono>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <thread>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <commdlg.h>
+#endif
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -13,6 +20,55 @@
 namespace dw5e::setup {
 
 namespace fs = std::filesystem;
+
+struct DialogState
+{
+    std::mutex mutex;
+    std::string selectedFile;
+    bool hasResult = false;
+};
+
+static void SDLCALL onFileDialogCallback(void *userdata, const char * const *filelist, int filter)
+{
+    (void)filter;
+    auto *state = static_cast<DialogState *>(userdata);
+    if (filelist && *filelist && **filelist)
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->selectedFile = *filelist;
+        state->hasResult = true;
+    }
+    else if (!filelist)
+    {
+#ifndef _WIN32
+        std::thread([state]() {
+            for (const char *cmd : {
+                "kdialog --getopenfilename . '*.iso *.ISO|ISO Disc Images (*.iso)\n*|All Files' 2>/dev/null",
+                "zenity --file-selection --file-filter='ISO Disc Images (*.iso) | *.iso *.ISO' --file-filter='All Files | *' 2>/dev/null"
+            }) {
+                FILE *pipe = popen(cmd, "r");
+                if (pipe) {
+                    char buf[1024] = {0};
+                    if (fgets(buf, sizeof(buf), pipe)) {
+                        std::string path(buf);
+                        while (!path.empty() && (path.back() == '\n' || path.back() == '\r'))
+                            path.pop_back();
+                        pclose(pipe);
+                        if (!path.empty()) {
+                            std::lock_guard<std::mutex> lock(state->mutex);
+                            state->selectedFile = path;
+                            state->hasResult = true;
+                            return;
+                        }
+                    } else {
+                        pclose(pipe);
+                    }
+                }
+            }
+        }).detach();
+#endif
+    }
+}
 
 int runWizardConsole(const SetupOptions &options)
 {
@@ -130,6 +186,7 @@ bool runWizardWindow(const WizardConfig &config)
         std::snprintf(isoPathBuf, sizeof(isoPathBuf), "%s", s.c_str());
     }
 
+    DialogState dialogState;
     std::unique_ptr<SetupRun> activeRun;
     bool quit = false;
     bool succeeded = false;
@@ -152,6 +209,15 @@ bool runWizardWindow(const WizardConfig &config)
                 {
                     std::snprintf(isoPathBuf, sizeof(isoPathBuf), "%s", event.drop.data);
                 }
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(dialogState.mutex);
+            if (dialogState.hasResult)
+            {
+                std::snprintf(isoPathBuf, sizeof(isoPathBuf), "%s", dialogState.selectedFile.c_str());
+                dialogState.hasResult = false;
             }
         }
 
@@ -190,7 +256,33 @@ bool runWizardWindow(const WizardConfig &config)
                 ImGui::SameLine();
                 if (ImGui::Button("Browse..."))
                 {
-                    // If file dialog is invoked
+#ifdef _WIN32
+                    OPENFILENAMEW ofn = {};
+                    wchar_t szFile[MAX_PATH] = {};
+                    ofn.lStructSize = sizeof(ofn);
+                    ofn.lpstrFile = szFile;
+                    ofn.nMaxFile = MAX_PATH;
+                    ofn.lpstrFilter = L"Disc Image (*.iso)\0*.iso\0All Files (*.*)\0*.*\0";
+                    ofn.nFilterIndex = 1;
+                    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+                    if (GetOpenFileNameW(&ofn))
+                    {
+                        int len = WideCharToMultiByte(CP_UTF8, 0, szFile, -1, nullptr, 0, nullptr, nullptr);
+                        if (len > 0)
+                        {
+                            std::string u8(len, 0);
+                            WideCharToMultiByte(CP_UTF8, 0, szFile, -1, u8.data(), len, nullptr, nullptr);
+                            while (!u8.empty() && u8.back() == '\0') u8.pop_back();
+                            std::snprintf(isoPathBuf, sizeof(isoPathBuf), "%s", u8.c_str());
+                        }
+                    }
+#else
+                    static const SDL_DialogFileFilter filters[] = {
+                        {"Disc Images (*.iso)", "iso"},
+                        {"All Files (*)", "*"}
+                    };
+                    SDL_ShowOpenFileDialog(onFileDialogCallback, &dialogState, window, filters, 2, nullptr, false);
+#endif
                 }
                 ImGui::TextDisabled("(Drag and drop dw5e.iso onto this window)");
 
