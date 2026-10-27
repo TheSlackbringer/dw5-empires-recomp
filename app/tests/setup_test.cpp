@@ -98,6 +98,36 @@ void testResetBuildIfMoved(const fs::path &tempDir)
     CHECK(!fs::exists(buildDir / "CMakeCache.txt"));
     CHECK(!fs::exists(buildDir / "CMakeFiles"));
 
+    // Test with release version mismatch (built-from.txt != BUILD_ID) -> MUST reset
+    std::ofstream cache2(buildDir / "CMakeCache.txt");
+    cache2 << "CMAKE_HOME_DIRECTORY:INTERNAL=" << srcDir1.generic_string() << "\n";
+    cache2.close();
+    fs::create_directories(buildDir / "CMakeFiles", ec);
+    std::ofstream(srcDir1.parent_path() / "BUILD_ID") << "v2\n";
+    std::ofstream(buildDir / "built-from.txt") << "v1\n";
+    CHECK(resetBuildIfMoved(buildDir, srcDir1));
+    CHECK(!fs::exists(buildDir / "CMakeCache.txt"));
+    fs::remove(srcDir1.parent_path() / "BUILD_ID", ec);
+    fs::remove(buildDir / "built-from.txt", ec);
+
+    // Test with toolchain sysroot present but missing from cache -> MUST reset
+    std::ofstream cache3(buildDir / "CMakeCache.txt");
+    cache3 << "CMAKE_HOME_DIRECTORY:INTERNAL=" << srcDir1.generic_string() << "\n";
+    cache3.close();
+    fs::create_directories(buildDir / "CMakeFiles", ec);
+    fs::create_directories(srcDir1.parent_path() / "tools" / "clang" / "sysroot", ec);
+    CHECK(resetBuildIfMoved(buildDir, srcDir1));
+    CHECK(!fs::exists(buildDir / "CMakeCache.txt"));
+
+    // Test with toolchain sysroot present and present in cache -> Should NOT reset
+    std::ofstream cache4(buildDir / "CMakeCache.txt");
+    cache4 << "CMAKE_HOME_DIRECTORY:INTERNAL=" << srcDir1.generic_string() << "\n";
+    cache4 << "CMAKE_SYSROOT:PATH=/some/sysroot\n";
+    cache4.close();
+    fs::create_directories(buildDir / "CMakeFiles", ec);
+    CHECK(!resetBuildIfMoved(buildDir, srcDir1));
+    CHECK(fs::exists(buildDir / "CMakeCache.txt"));
+
     std::cout << "  -> PASS\n";
 }
 

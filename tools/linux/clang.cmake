@@ -32,3 +32,10 @@ if(EXISTS "${DW5E_LINUX_TOOLCHAIN_ROOT}/lib")
     string(APPEND CMAKE_SHARED_LINKER_FLAGS_INIT " -L${DW5E_LINUX_TOOLCHAIN_ROOT}/lib -Wl,-rpath,'$ORIGIN'")
 endif()
 list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES DW5E_LINUX_TOOLCHAIN_ROOT)
+
+# Preseed BSD string function probes so SDL3 uses its internal implementations
+# rather than probing the host C library when targeting the relocatable sysroot.
+set(LIBC_HAS_STRLCPY "" CACHE INTERNAL "Have symbol strlcpy")
+set(LIBC_HAS_STRLCAT "" CACHE INTERNAL "Have symbol strlcat")
+set(LIBC_HAS_WCSLCPY "" CACHE INTERNAL "Have symbol wcslcpy")
+set(LIBC_HAS_WCSLCAT "" CACHE INTERNAL "Have symbol wcslcat")

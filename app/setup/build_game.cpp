@@ -101,11 +101,15 @@ bool resetBuildIfMoved(const fs::path &buildDir, const fs::path &sourceDir)
         return false;
 
     const std::string key = "CMAKE_HOME_DIRECTORY:INTERNAL=";
+    const std::string sysrootKey = "CMAKE_SYSROOT:";
     std::string line, configured;
+    bool cacheHasSysroot = false;
     while (std::getline(cache, line))
     {
         if (line.rfind(key, 0) == 0)
             configured = line.substr(key.size());
+        else if (line.rfind(sysrootKey, 0) == 0)
+            cacheHasSysroot = true;
     }
     cache.close();
 
@@ -123,7 +127,39 @@ bool resetBuildIfMoved(const fs::path &buildDir, const fs::path &sourceDir)
         return text;
     };
 
-    if (configured.empty() || normal(fs::path(configured)) == normal(sourceDir))
+    auto firstLine = [](const fs::path &p) -> std::string {
+        std::ifstream file(p);
+        std::string l;
+        if (std::getline(file, l))
+        {
+            while (!l.empty() && (l.back() == '\r' || l.back() == '\n' || l.back() == ' '))
+                l.pop_back();
+            return l;
+        }
+        return {};
+    };
+
+    bool needReset = configured.empty() || normal(fs::path(configured)) != normal(sourceDir);
+
+    if (!needReset)
+    {
+        const fs::path root = sourceDir.parent_path();
+        const std::string release = firstLine(root / "BUILD_ID");
+        const std::string builtFrom = firstLine(buildDir / "built-from.txt");
+        if (!release.empty() && !builtFrom.empty() && release != builtFrom)
+            needReset = true;
+    }
+
+    if (!needReset)
+    {
+        const fs::path root = sourceDir.parent_path();
+        const fs::path sysroot = root / "tools" / "clang" / "sysroot";
+        std::error_code ec;
+        if (fs::exists(sysroot, ec) && !cacheHasSysroot)
+            needReset = true;
+    }
+
+    if (!needReset)
         return false;
 
     std::error_code ec;
