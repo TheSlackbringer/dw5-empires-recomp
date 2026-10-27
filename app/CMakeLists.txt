@@ -180,3 +180,13 @@ if(WIN32)
         VERBATIM)
 endif()
 add_test(NAME gpu_plugin_load_tests COMMAND dw5e_gpu_plugin_test)
+
+# Hardware check, invoked explicitly on a Vulkan-capable Linux host. The five
+# existing CTests stay independent of GPU availability (including clean CI).
+if(UNIX AND NOT APPLE AND REXGLUE_USE_VULKAN)
+    add_executable(dw5e_vulkan_startup_test EXCLUDE_FROM_ALL tests/vulkan_startup_test.cpp)
+    target_link_libraries(dw5e_vulkan_startup_test PRIVATE rex::runtime)
+    target_include_directories(dw5e_vulkan_startup_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../rexglue-sdk/thirdparty/renderdoc)
+    rexglue_apply_target_settings(dw5e_vulkan_startup_test)
+endif()

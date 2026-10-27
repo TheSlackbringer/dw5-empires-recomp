@@ -1,5 +1,6 @@
 """Offline release fixtures. No game data, external tools, or network."""
 from pathlib import Path
+import os
 import subprocess
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ import zipfile
 
 import make_release as release
 import export_linux_sdk as sdk
+import verify_package
 
 
 class WindowsPackageTest(unittest.TestCase):
@@ -108,6 +110,59 @@ class WindowsPackageTest(unittest.TestCase):
 
 
 class LinuxRuntimeTest(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Linux packaging symlink layout")
+    def test_private_runtime_keeps_platform_library_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stage = Path(directory)
+            (stage / "usr/lib").mkdir(parents=True)
+            canonical = stage / "usr/lib/libwayland-client.so.0.18"
+            canonical.write_text("SDK Wayland")
+            alias = stage / "usr/lib/libwayland-client.so.0"
+            alias.symlink_to("libwayland-client.so.0.18")
+            iterdir = Path.iterdir
+            def entries(path):
+                return iter((canonical, alias)) if path == stage / "usr/lib" else iterdir(path)
+            with patch.object(sdk, "host_dependencies", return_value=set()), \
+                 patch.object(Path, "iterdir", entries):
+                release.isolate_linux_tool_runtime(stage, [], {}, "unused-patchelf")
+            self.assertFalse(alias.is_symlink())
+            self.assertEqual((stage / "tools/recompiler-runtime/usr/lib/libwayland-client.so.0")
+                             .read_text(), "SDK Wayland")
+
+    def test_actual_package_rejects_platform_libraries_on_game_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "usr/lib").mkdir(parents=True)
+            (root / "usr/lib/libwayland-client.so.0").write_text("older SDK Wayland")
+            with self.assertRaisesRegex(SystemExit, "host.*driver|driver.*host"):
+                verify_package.validate_linux_driver_runtime(root)
+
+    def test_recompiler_dependencies_are_private_to_build_tools(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage = root / "stage"
+            (stage / "usr/lib").mkdir(parents=True)
+            libraries = []
+            for name in ("libwayland-client.so.0", "libxcb.so.1", "libX11.so.6",
+                         "libgcc_s.so.1", "librexruntimerd.so", "libc++.so.1"):
+                source = root / name
+                source.write_bytes(b"\x7fELFsynthetic " + name.encode())
+                libraries.append(source)
+                (stage / "usr/lib" / name).write_bytes(source.read_bytes())
+            for name in ("tools/rexglue", "usr/bin/rexglue"):
+                path = stage / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"\x7fELFsynthetic translator")
+            with patch.object(sdk, "host_dependencies", return_value=set(libraries)), \
+                 patch.object(release.subprocess, "run"):
+                release.isolate_linux_tool_runtime(stage, [root / "rexglue"], {}, "patchelf")
+            for source in libraries:
+                self.assertTrue((stage / "tools/recompiler-runtime/usr/lib" / source.name).is_file())
+            for name in ("libwayland-client.so.0", "libxcb.so.1", "libX11.so.6", "libgcc_s.so.1"):
+                self.assertFalse((stage / "usr/lib" / name).exists())
+            self.assertTrue((stage / "usr/lib/librexruntimerd.so").is_file())
+            self.assertTrue((stage / "usr/lib/libc++.so.1").is_file())
+
     def test_linux_runtime_closure_includes_libraries_linuxdeploy_omitted(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

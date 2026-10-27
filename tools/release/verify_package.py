@@ -7,6 +7,16 @@ import subprocess
 import tempfile
 
 
+def validate_linux_driver_runtime(root):
+    platform_prefixes = ('libwayland-', 'libxcb', 'libX', 'libdrm', 'libvulkan',
+                         'libGL', 'libEGL', 'libgbm', 'libstdc++', 'libgcc_s', 'libLLVM')
+    conflicts = [str(path.relative_to(root)) for path in (root / 'usr/lib').rglob('*')
+                 if '.so' in path.name and path.name.startswith(platform_prefixes)]
+    if conflicts:
+        raise SystemExit('bundled libraries would override host graphics-driver dependencies:\n  ' +
+                         '\n  '.join(sorted(conflicts)))
+
+
 def validate_package(root, windows):
     root = Path(root)
     required = [
@@ -42,6 +52,8 @@ def validate_package(root, windows):
     if missing:
         raise SystemExit("incomplete builder package; required files missing:\n  " +
                          "\n  ".join(missing))
+    if not windows:
+        validate_linux_driver_runtime(root)
 
 
 def package_environment(root, windows):
@@ -145,11 +157,12 @@ def build_linux_sdk(root, build=None):
     tests = ["dw5e_setup_test", "dw5e_setup_reliability_test",
              "dw5e_safe_read_test", "dw5e_kernel_export_test", "dw5e_gpu_plugin_test"]
     run([cmake, "--build", build, "--target", "dw5e_setup", "dw5e_host_portability",
-         "rexglue", *tests, "--parallel", str(os.cpu_count() or 1)])
+         "rexglue", "dw5e_vulkan_startup_test", *tests, "--parallel", str(os.cpu_count() or 1)])
     # Prefer the newly built runtime over the prebuilt AppImage runtime.
     run_env = env.copy()
     run_env["LD_LIBRARY_PATH"] = ":".join(map(str, [
         build, build / "rexglue-sdk/src/system", build / "rexglue-sdk/thirdparty",
+        root / "tools/recompiler-runtime/usr/lib",
         env["LD_LIBRARY_PATH"],
     ]))
     for test in tests:

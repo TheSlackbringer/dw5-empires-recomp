@@ -60,7 +60,7 @@ jobs:
 
       - name: Build setup wizard, tests & ReXGlue recompiler
         run: |
-          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test rexgpu-xenos rexglue -j$(nproc)
+          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test dw5e_vulkan_startup_test rexgpu-xenos rexglue -j$(nproc)
 
       - name: Run unit tests
         run: |

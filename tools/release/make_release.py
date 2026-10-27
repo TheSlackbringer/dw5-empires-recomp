@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 import export_linux_sdk
@@ -358,6 +359,36 @@ def bundle_linux_runtime(stage, binaries, env):
             shutil.copy2(library, destination)
 
 
+def isolate_linux_tool_runtime(stage, binaries, env, patchelf):
+    """Keep the offline translator's dependency closure out of the game process."""
+    private = stage / 'tools/recompiler-runtime'
+    bundle_linux_runtime(private, binaries, env)
+    libraries = private / 'usr/lib'
+    # Only application-built libraries and their C++ ABI belong on the game's
+    # path. Platform libraries must match the host's Vulkan driver/desktop.
+    platform_libraries = [path for path in (stage / 'usr/lib').iterdir()
+                          if (path.is_file() or path.is_symlink()) and not path.name.startswith(
+                              ('librex', 'libTracyClient', 'libc++.so', 'libc++abi.so', 'libunwind.so'))]
+    # Copy aliases while their original targets still exist, regardless of the
+    # filesystem's directory order. Private SONAME files are self-contained.
+    for path in platform_libraries:
+        shutil.copy2(path, libraries / path.name)
+    for path in platform_libraries:
+        path.unlink()
+
+    targets = [(path, '$ORIGIN') for path in libraries.iterdir()]
+    targets += [(stage / 'tools/rexglue', '$ORIGIN/recompiler-runtime/usr/lib'),
+                (stage / 'usr/bin/rexglue', '$ORIGIN/../../tools/recompiler-runtime/usr/lib')]
+    for path, rpath in targets:
+        if path.is_symlink() or not path.is_file():
+            continue
+        with path.open('rb') as stream:
+            if stream.read(4) != b'\x7fELF':
+                continue
+        subprocess.run([str(patchelf), '--force-rpath', '--set-rpath', rpath, str(path)],
+                       check=True)
+
+
 def linux(build, recomp_build, sdk, appimage_tools, test):
     launcher = build / 'DW5E'
     if not launcher.exists():
@@ -459,7 +490,14 @@ def linux(build, recomp_build, sdk, appimage_tools, test):
     runtime_inputs = [launcher, recompiler]
     runtime_inputs.extend(so for so in so_candidates if so.is_file())
     runtime_inputs.extend(lib for lib in (sdk / 'lib').glob('*.so*') if lib.is_file())
-    bundle_linux_runtime(stage, runtime_inputs, env)
+    # The translator needs desktop imports even in clean, non-graphical CI.
+    # Those older imports must not replace the player's host-driver libraries.
+    with tempfile.TemporaryDirectory(prefix='dw5e-linuxdeploy-') as directory:
+        subprocess.run([str((appimage_tools / 'linuxdeploy-x86_64.AppImage').resolve()),
+                        '--appimage-extract', 'usr/bin/patchelf'],
+                       cwd=directory, stdout=subprocess.DEVNULL, env=env, check=True)
+        patcher = Path(directory) / 'squashfs-root/usr/bin/patchelf'
+        isolate_linux_tool_runtime(stage, runtime_inputs, env, patcher)
 
     app_run = stage / 'AppRun'
     app_run.unlink(missing_ok=True)
