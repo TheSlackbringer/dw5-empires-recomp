@@ -26,12 +26,24 @@ def export_sdk(output, cxx=None):
     output.mkdir(parents=True, exist_ok=True)
     programs = {}
     for name in ['clang', 'ld.lld', 'llvm-ar', 'cmake', 'ninja', 'pkg-config']:
-        candidates = [
-            name,
-            f"{name}-23",
-            f"/usr/lib/llvm-23/bin/{name}",
-            f"/usr/lib/llvm-23/bin/{'lld' if name == 'ld.lld' else name}",
-        ]
+        if name in ('clang', 'ld.lld', 'llvm-ar'):
+            candidates = [
+                f"/usr/lib/llvm-23/bin/{'lld' if name == 'ld.lld' else name}",
+                f"{name}-23",
+                f"/usr/lib/llvm-22/bin/{name}",
+                f"{name}-22",
+                f"/usr/lib/llvm-21/bin/{name}",
+                f"{name}-21",
+                f"/usr/lib/llvm-20/bin/{name}",
+                f"{name}-20",
+                f"/usr/lib/llvm-19/bin/{name}",
+                f"{name}-19",
+                f"/usr/lib/llvm-18/bin/{name}",
+                f"{name}-18",
+                name,
+            ]
+        else:
+            candidates = [name]
         for cand in candidates:
             which = shutil.which(cand) or (cand if Path(cand).is_file() else None)
             if which:
@@ -39,8 +51,8 @@ def export_sdk(output, cxx=None):
                 break
 
     if not programs.get('clang'):
-        # Search common llvm locations
-        for p in Path('/usr/lib').glob('llvm-*/bin/clang'):
+        # Search common llvm locations in descending order
+        for p in sorted(Path('/usr/lib').glob('llvm-*/bin/clang'), reverse=True):
             programs['clang'] = str(p)
             programs['ld.lld'] = str(p.parent / 'lld')
             programs['llvm-ar'] = str(p.parent / 'llvm-ar')
@@ -62,7 +74,7 @@ def export_sdk(output, cxx=None):
     for library in libraries:
         copy_file(library, output / 'host-libs' / library.name)
 
-    for alias, target in {'clang++': 'clang', 'llvm-ranlib': 'llvm-ar'}.items():
+    for alias, target in {'clang++': 'clang', 'llvm-ranlib': 'llvm-ar', 'lld': 'ld.lld'}.items():
         path = output / 'libexec' / alias
         path.unlink(missing_ok=True)
         try:
@@ -105,7 +117,7 @@ set -eu
 tool=$(basename "$0")
 sdk=$(dirname "$(dirname "$(readlink -f "$0")")")
 export LD_LIBRARY_PATH="$sdk/host-libs:$sdk/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export PATH="$sdk/bin:$PATH"
+export PATH="$sdk/bin:$sdk/libexec:$PATH"
 case "$tool" in
   cmake)
     exec "$sdk/cmake/bin/cmake" "$@" ;;
@@ -118,7 +130,7 @@ exec "$sdk/libexec/$tool" "$@"
 ''')
     wrapper.chmod(0o755)
 
-    for name in (*programs, 'clang++', 'llvm-ranlib'):
+    for name in (*programs, 'clang++', 'llvm-ranlib', 'lld'):
         path = bin_dir / name
         path.unlink(missing_ok=True)
         try:
