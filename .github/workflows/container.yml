@@ -1,0 +1,44 @@
+name: container
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/docker/**'
+      - '.github/workflows/container.yml'
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/dw5e-release-linux
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v6
+        with:
+          context: tools/docker
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
