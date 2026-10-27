@@ -5,6 +5,7 @@
 #pragma once
 
 #include <rex/rex_app.h>
+#include "dw5e_input.h"
 
 void Dw5eRegisterSnapshotBind();  // src/dw5e_snapshot.cpp
 
@@ -25,6 +26,7 @@ class Dw5eApp : public rex::ReXApp {
   // void OnPostLoadXexImage() override {}
   void OnPostSetup() override { Dw5eRegisterSnapshotBind(); }
   void OnConfigurePaths(rex::PathConfig& paths) override {
+    Dw5eConfigureKeyboardDefaults();
     if (paths.game_data_root.empty()) {
       auto exe = rex::filesystem::GetExecutableFolder();
       auto candidate = exe.parent_path() / "game" / "files";

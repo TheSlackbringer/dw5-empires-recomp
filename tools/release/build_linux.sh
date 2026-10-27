@@ -43,7 +43,9 @@ cmake -S "$REPO_ROOT/app" -B "$BUILD_DIR" \
     -DCMAKE_TOOLCHAIN_FILE="$REPO_ROOT/tools/linux/clang.cmake"
 
 echo "==> Building setup wizard and test binaries..."
-cmake --build "$BUILD_DIR" --target dw5e_setup dw5e_setup_test -j"$(nproc)"
+cmake --build "$BUILD_DIR" --target dw5e_setup dw5e_setup_test \
+    dw5e_setup_reliability_test dw5e_safe_read_test dw5e_kernel_export_test \
+    dw5e_gpu_plugin_test dw5e_keyboard_test -j"$(nproc)"
 
 if [ "$RUN_TESTS" = true ]; then
     echo "==> Running unit tests..."

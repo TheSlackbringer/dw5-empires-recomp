@@ -45,20 +45,26 @@ Your game data, saves, settings, and logs are stored in:
 
 ## Controls
 
-Supports both gamepads (XInput / Xbox controllers recommended) and keyboard input:
+Gamepads (XInput / Xbox controllers recommended) and keyboard work together.
+Keyboard controls are enabled by default; existing custom bindings are preserved.
 
 | Action | Xbox Gamepad | Keyboard |
 | :--- | :--- | :--- |
 | **Move** | Left Stick / D-Pad | WASD / Arrow Keys |
-| **Camera Orbit (Yaw & Pitch)** | Right Stick | — |
-| **Normal Attack** | X | J |
-| **Charge Attack** | Y | I |
-| **Musou Attack** | B | L |
-| **Jump** | A | Space |
-| **Guard / Center Camera** | LB | Left Shift |
-| **Bow Attack / Strafe** | RB | K |
+| **Camera Orbit** | Right Stick | J / L (left / right) |
+| **Normal Attack** | X | Z / Numpad 0 |
+| **Charge Attack** | Y | V / Numpad 1 |
+| **Musou Attack / Menu Cancel** | B | C / Backspace |
+| **Jump / Menu Confirm** | A | X / Space |
+| **Guard / Center Camera** | LB | Q |
+| **Bow Attack / Strafe** | RB | E |
 | **Pause / Map** | Start / Back | Enter / Tab |
+| **Triggers** | LT / RT | 1 / 3 |
+| **Stick Clicks** | Left / Right Stick Click | F / G |
 | **Save Memory Snapshot (Debug)** | F9 | F9 |
+
+I / K provide right-stick up / down. Vertical camera pitch remains disabled by
+default. Gamepad controls are unchanged. Actions follow the game's controller settings.
 
 ---
 

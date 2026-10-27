@@ -155,7 +155,8 @@ def build_linux_sdk(root, build=None):
          "-DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF",
          "-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF"])
     tests = ["dw5e_setup_test", "dw5e_setup_reliability_test",
-             "dw5e_safe_read_test", "dw5e_kernel_export_test", "dw5e_gpu_plugin_test"]
+             "dw5e_safe_read_test", "dw5e_kernel_export_test", "dw5e_gpu_plugin_test",
+             "dw5e_keyboard_test"]
     run([cmake, "--build", build, "--target", "dw5e_setup", "dw5e_host_portability",
          "rexglue", "dw5e_vulkan_startup_test", *tests, "--parallel", str(os.cpu_count() or 1)])
     # Prefer the newly built runtime over the prebuilt AppImage runtime.

@@ -25,6 +25,7 @@ include(generated/rexglue.cmake)
 if(DW5E_BUILD_GAME)
     set(DW5E_SOURCES
         src/main.cpp
+        src/dw5e_input.cpp
         src/dw5e_trace_hooks.cpp
         src/dw5e_snapshot.cpp
         src/dw5e_camera.cpp
@@ -159,6 +160,17 @@ add_executable(dw5e_kernel_export_test tests/kernel_export_test.cpp)
 target_link_libraries(dw5e_kernel_export_test PRIVATE rex::runtime)
 add_test(NAME kernel_export_link_tests COMMAND dw5e_kernel_export_test)
 
+# Run the real application path-config hook and native input with no SDL
+# initialization, device access, window, or generated/retail game code.
+add_executable(dw5e_keyboard_test tests/keyboard_test.cpp src/dw5e_input.cpp
+    ${REXGLUE_SHARE_DIR}/rex_app.cpp)
+target_link_libraries(dw5e_keyboard_test PRIVATE rex::runtime)
+target_compile_definitions(dw5e_keyboard_test PRIVATE REXGLUE_BUILD_CONFIG="$<CONFIG>")
+target_include_directories(dw5e_keyboard_test PRIVATE
+    $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>)
+rexglue_apply_target_settings(dw5e_keyboard_test)
+add_test(NAME keyboard_unit_tests COMMAND dw5e_keyboard_test)
+
 # Load the real runtime plugin, rather than only proving it compiles/links.
 add_executable(dw5e_gpu_plugin_test tests/gpu_plugin_test.cpp)
 target_link_libraries(dw5e_gpu_plugin_test PRIVATE rex::runtime)
@@ -181,8 +193,8 @@ if(WIN32)
 endif()
 add_test(NAME gpu_plugin_load_tests COMMAND dw5e_gpu_plugin_test)
 
-# Hardware check, invoked explicitly on a Vulkan-capable Linux host. The five
-# existing CTests stay independent of GPU availability (including clean CI).
+# Hardware check, invoked explicitly on a Vulkan-capable Linux host. CTests
+# stay independent of GPU availability (including clean CI).
 if(UNIX AND NOT APPLE AND REXGLUE_USE_VULKAN)
     add_executable(dw5e_vulkan_startup_test EXCLUDE_FROM_ALL tests/vulkan_startup_test.cpp)
     target_link_libraries(dw5e_vulkan_startup_test PRIVATE rex::runtime)
