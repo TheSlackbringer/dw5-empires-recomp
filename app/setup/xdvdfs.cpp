@@ -210,7 +210,7 @@ bool checkDiscImage(const std::filesystem::path &isoPath,
     int64_t base = detectPartitionBase(stream);
     if (base < 0)
     {
-        error = "no valid XDVDFS volume descriptor found (is this an Xbox 360 game ISO?)";
+        error = "not a valid Xbox 360 disc image (no XDVDFS filesystem found)";
         return false;
     }
 
@@ -234,20 +234,26 @@ bool checkDiscImage(const std::filesystem::path &isoPath,
         return false;
 
     bool foundXex = false;
+    bool foundLinkData = false;
     for (const auto &e : entries)
     {
         std::string lowerName = e.path;
         std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
         if (lowerName == "default.xex")
-        {
             foundXex = true;
-            break;
-        }
+        if (lowerName == "linkdata.bin" || lowerName == "linkdata.idx")
+            foundLinkData = true;
     }
 
     if (!foundXex)
     {
         error = "valid XDVDFS filesystem found, but default.xex is missing";
+        return false;
+    }
+
+    if (!foundLinkData)
+    {
+        error = "disc is an Xbox 360 image, but not Dynasty Warriors 5: Empires (LINKDATA.BIN missing)";
         return false;
     }
 

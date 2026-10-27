@@ -206,7 +206,8 @@ void SetupRun::run()
 
         if (discSha1 != kExpectedDiscSha1)
         {
-            appendLog("Warning: Disc SHA-1 " + discSha1 + " differs from expected European PAL retail (" + kExpectedDiscSha1 + ")");
+            fail("Disc verification failed: SHA-1 " + discSha1 + " does not match expected European PAL retail disc (" + kExpectedDiscSha1 + ")");
+            return;
         }
         setStep(Step::Check, 1.0, "Disc verification passed.");
     }

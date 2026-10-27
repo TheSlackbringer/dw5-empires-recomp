@@ -131,6 +131,18 @@ void testRealDiscIfPresent()
     CHECK(foundXex);
     std::cout << "  -> Found " << entries.size() << " files on disc (XGD2 base 0x"
               << std::hex << base << std::dec << ")\n";
+
+    // Test that a non-Xbox ISO correctly fails checkDiscImage
+    fs::path dummyIso = fs::temp_directory_path() / "test_dummy_non_xbox.iso";
+    std::ofstream dummy(dummyIso);
+    dummy << "NOT_AN_XBOX_ISO_DATA_0123456789";
+    dummy.close();
+    uint64_t dummyBase = 0;
+    std::string dummyErr;
+    CHECK(!checkDiscImage(dummyIso, dummyBase, dummyErr));
+    CHECK(!dummyErr.empty());
+    fs::remove(dummyIso);
+
     std::cout << "  -> PASS\n";
 }
 

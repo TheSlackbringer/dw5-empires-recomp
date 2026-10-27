@@ -1,5 +1,6 @@
 #include "wizard_ui.h"
 #include "install_state.h"
+#include "xdvdfs.h"
 
 #include <chrono>
 #include <iostream>
@@ -191,6 +192,10 @@ bool runWizardWindow(const WizardConfig &config)
     bool quit = false;
     bool succeeded = false;
 
+    std::string validatedIsoPath = "__uninit__";
+    bool isoValid = false;
+    std::string isoError;
+
     while (!quit)
     {
         SDL_Event event;
@@ -246,6 +251,36 @@ bool runWizardWindow(const WizardConfig &config)
             }
             else if (!activeRun)
             {
+                const std::string currentIso = isoPathBuf;
+                if (currentIso != validatedIsoPath)
+                {
+                    validatedIsoPath = currentIso;
+                    isoError.clear();
+                    isoValid = false;
+                    if (!currentIso.empty())
+                    {
+                        std::error_code ec;
+                        fs::path p(currentIso);
+                        if (!fs::exists(p, ec) || !fs::is_regular_file(p, ec))
+                        {
+                            isoError = "File not found: " + currentIso;
+                        }
+                        else
+                        {
+                            uint64_t partBase = 0;
+                            std::string err;
+                            if (!checkDiscImage(p, partBase, err))
+                            {
+                                isoError = err;
+                            }
+                            else
+                            {
+                                isoValid = true;
+                            }
+                        }
+                    }
+                }
+
                 ImGui::TextWrapped("To play, select your legally owned retail European PAL disc image (.iso). "
                                    "The wizard will extract game assets, translate the PowerPC code, and compile the native executable.");
                 ImGui::Spacing();
@@ -284,7 +319,22 @@ bool runWizardWindow(const WizardConfig &config)
                     SDL_ShowOpenFileDialog(onFileDialogCallback, &dialogState, window, filters, 2, nullptr, false);
 #endif
                 }
-                ImGui::TextDisabled("(Drag and drop dw5e.iso onto this window)");
+
+                if (!validatedIsoPath.empty())
+                {
+                    if (!isoValid)
+                    {
+                        ImGui::TextColored(ImVec4(0.95f, 0.25f, 0.25f, 1.0f), "Error: %s", isoError.c_str());
+                    }
+                    else
+                    {
+                        ImGui::TextColored(ImVec4(0.25f, 0.85f, 0.45f, 1.0f), "Valid Dynasty Warriors 5: Empires disc image detected.");
+                    }
+                }
+                else
+                {
+                    ImGui::TextDisabled("(Drag and drop dw5e.iso onto this window)");
+                }
 
                 ImGui::Spacing();
                 ImGui::Separator();
@@ -293,15 +343,24 @@ bool runWizardWindow(const WizardConfig &config)
                 ImGui::TextDisabled("Estimated time on first launch: ~2 to 4 minutes.");
                 ImGui::Spacing();
 
-                bool canStart = (config.discInstalled || isoPathBuf[0] != '\0');
+                bool canStart = false;
+                if (isoValid)
+                {
+                    canStart = true;
+                }
+                else if (config.discInstalled && validatedIsoPath.empty())
+                {
+                    canStart = true;
+                }
+
                 if (!canStart)
                     ImGui::BeginDisabled();
 
                 if (ImGui::Button("Install & Play", ImVec2(160, 36)))
                 {
                     SetupOptions opts = config.base;
-                    if (isoPathBuf[0] != '\0')
-                        opts.discIso = fs::path(isoPathBuf);
+                    if (isoValid)
+                        opts.discIso = fs::path(validatedIsoPath);
                     activeRun = std::make_unique<SetupRun>(opts);
                     activeRun->start();
                 }
