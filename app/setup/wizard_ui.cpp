@@ -24,6 +24,14 @@ int runWizardConsole(const SetupOptions &options)
         std::cout << "Disc image:     " << options.discIso.string() << "\n";
     std::cout << "----------------------------------------------------\n";
 
+    if (options.discIso.empty())
+    {
+        std::cerr << "\nERROR: No disc image specified.\n"
+                  << "To run in console mode: pass --iso /path/to/dw5e.iso\n"
+                  << "Otherwise, launch from a desktop session with display available.\n";
+        return 1;
+    }
+
     SetupRun run(options);
     run.start();
 
@@ -82,6 +90,7 @@ bool runWizardWindow(const WizardConfig &config)
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window)
     {
+        std::cerr << "SDL_CreateWindow failed (" << SDL_GetError() << "), falling back to console setup." << std::endl;
         SDL_Quit();
         return runWizardConsole(config.base) == 0;
     }
@@ -89,6 +98,7 @@ bool runWizardWindow(const WizardConfig &config)
     SDL_Renderer *renderer = SDL_CreateRenderer(window, nullptr);
     if (!renderer)
     {
+        std::cerr << "SDL_CreateRenderer failed (" << SDL_GetError() << "), falling back to console setup." << std::endl;
         SDL_DestroyWindow(window);
         SDL_Quit();
         return runWizardConsole(config.base) == 0;
