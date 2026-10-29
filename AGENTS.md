@@ -93,7 +93,12 @@ Look-ups (repo map, camera architecture, Ghidra, pitfalls): "Reference" at the e
 - **Commit identity:** author/committer `TheSlackbringer <15327900+TheSlackbringer@users.noreply.github.com>`;
   end messages with `Co-Authored-By: Claude <model> <noreply@anthropic.com>` (or relevant assistant).
 - **Use the Ghidra MCP whenever you can** (`mcp__ghidra__*` tools) for reverse engineering; call `get_program_info` first.
-  Ghidra 12.1.2 at `/opt/ghidra`, PPC 64/32-bit big-endian (`ppc:BE:64:default` / `ppc:BE:32:default`).
+  Ghidra 12.1.4, official build (install path, extensions and MCP registration: `notes/PROJECT_SETUP.md`), PPC 64/32-bit
+  big-endian (`ppc:BE:64:default` / `ppc:BE:32:default`). Second MCP `ghidra-bethington` (port 8089) reaches every open
+  program via `program=<name>`; use its MCP tools, not `curl`. Switch projects unattended with its `open_project`
+  (`path=<absolute .gpr>`, `headless=false`, `program=/<program>`), then `get_program_info`; it saves first and refuses
+  while analysis runs (needs the locally patched plugin). Never call `exit_ghidra`, `delete_file`, `import_*`, archive
+  or checkout tools. One CodeBrowser at a time.
 - **Never delete build dirs containing `_deps`;** no `rm` with bare shell variables (use `"${VAR:?}"`).
 
 ---
