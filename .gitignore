@@ -65,9 +65,13 @@ tools/ghidra-ext/work/
 *.phase
 *.gdb.out
 run*.txt
-/notes/snapshots/
 *.bak*
 imgui.ini
+
+# =============================================================================
+# Local research notes: their own private git repo (specs, work logs, tests, handoffs)
+# =============================================================================
+/notes/
 
 # =============================================================================
 # Python & IDE caches

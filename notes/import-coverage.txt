@@ -1,7 +1,0 @@
-157 imports: implemented 144, stub 0, variable (handled?) 10, missing 3
-
-STUB: -
-
-VARIABLE (HANDLED?): KeDebugMonitorData [named in src], KeTimeStampBundle [named in src], KeCertMonitorData [named in src], VdGlobalDevice [named in src], VdGpuClockInMHz [named in src], VdHSIOCalibrationLock [named in src], ExThreadObjectType [named in src], ExLoadedCommandLine [named in src], XexExecutableModuleHandle [named in src], XboxKrnlVersion [named in src]
-
-MISSING: sprintf, _vsnprintf, DbgPrint

@@ -1,9 +1,0 @@
-# found by tools pattern search in default.pe
-restgprlr_14_address = 0x82469CD0
-savegprlr_14_address = 0x82469C80
-restfpr_14_address = 0x8246A77C
-savefpr_14_address = 0x8246A730
-restvmx_14_address = 0x82469FC8
-savevmx_14_address = 0x82469D30
-restvmx_64_address = 0x8246A05C
-savevmx_64_address = 0x82469DC4
