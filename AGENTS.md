@@ -199,8 +199,9 @@ Audio: `audio_mute`, `ffmpeg_verbose`. Camera: `dw5e_rstick_camera_speed`, `dw5e
 In game: **F3** debug overlay (`Guest: X FPS (Y ms)`), **F9** memory snapshot.
 
 ### Measuring speed and frame pacing
-- F3's guest FPS is the interval between guest `XE_SWAP` packets (`src/graphics/command_processor.cpp`); the game
-  presents every 2nd vblank, so normal speed is a steady 30 FPS / ~33.3 ms.
+- F3's guest FPS counts guest `XE_SWAP` packets over the last second (`src/graphics/command_processor.cpp`). In play
+  the game presents every vblank (interval 1), so normal speed is a steady 60 FPS / ~16.7 ms; movies use interval 2
+  (30 FPS). The game is frame-locked: fewer game frames per second means slow motion (game speed = FPS / 60).
 - The guest vblank thread (`src/graphics/graphics_system.cpp`) sleeps 1 ms per loop and catches up missed vblanks in a
   burst; on Windows the default timer resolution is ~15.6 ms and the runtime does not raise it.
 - `--perf_log_csv` exists but is not wired up (nothing opens the file). RelWithDebInfo builds mark each swap for
