@@ -474,7 +474,10 @@ def linux(build, recomp_build, sdk, appimage_tools, test):
     shutil.copy2(REPO / 'LICENSE', lic / 'dw5e (GPL-3.0).txt')
     shutil.copy2(REPO / 'rexglue-sdk/LICENSE', lic / 'rexglue-sdk (BSD-3-Clause).txt')
 
-    icon = REPO / 'tools/release/dw5e.svg'
+    # appimagetool builds .DirIcon only from a PNG (or XPM) named after the
+    # desktop file's Icon, and linuxdeploy would put an SVG in the AppDir root
+    # instead. dw5e.png is dw5e.svg rendered at 256x256 (rsvg-convert).
+    icon = REPO / 'tools/release/dw5e.png'
     desktop = REPO / 'tools/release/dw5e.desktop'
     ld_path = f"{stage / 'usr/lib'}:{build / 'rexglue-sdk/src/system'}:{os.environ.get('LD_LIBRARY_PATH', '')}"
     env = {**os.environ, 'APPIMAGE_EXTRACT_AND_RUN': '1', 'ARCH': 'x86_64', 'NO_STRIP': '1', 'LD_LIBRARY_PATH': ld_path}

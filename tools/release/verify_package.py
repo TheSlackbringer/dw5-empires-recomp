@@ -17,6 +17,14 @@ def validate_linux_driver_runtime(root):
                          '\n  '.join(sorted(conflicts)))
 
 
+def validate_linux_icon(root):
+    # appimagetool derives .DirIcon only from <Icon>.png or .xpm in the AppDir
+    # root (not .svg) and refuses to build without one.
+    icon = root / "dw5e.png"
+    if not icon.is_file() or icon.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+        raise SystemExit("AppDir root needs the PNG icon dw5e.png for .DirIcon (an SVG is not accepted)")
+
+
 def validate_package(root, windows):
     root = Path(root)
     required = [
@@ -54,6 +62,7 @@ def validate_package(root, windows):
                          "\n  ".join(missing))
     if not windows:
         validate_linux_driver_runtime(root)
+        validate_linux_icon(root)
 
 
 def package_environment(root, windows):

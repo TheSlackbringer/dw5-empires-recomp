@@ -146,6 +146,18 @@ class LinuxRuntimeTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "host.*driver|driver.*host"):
                 verify_package.validate_linux_driver_runtime(root)
 
+    def test_actual_package_needs_png_icon_for_diricon(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "dw5e.svg").write_text("<svg/>")
+            with self.assertRaisesRegex(SystemExit, "PNG icon"):
+                verify_package.validate_linux_icon(root)
+            (root / "dw5e.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 8)
+            verify_package.validate_linux_icon(root)
+
+    def test_shipped_linux_icon_is_png(self):
+        verify_package.validate_linux_icon(release.REPO / "tools/release")
+
     def test_recompiler_dependencies_are_private_to_build_tools(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
