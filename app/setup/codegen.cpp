@@ -65,7 +65,8 @@ bool generateCode(const fs::path &root,
     mf << "includes = [\n";
     mf << "    \"" << toTomlPath(configDir / "functions.toml") << "\",\n";
     mf << "    \"" << toTomlPath(configDir / "trace_hooks.toml") << "\",\n";
-    mf << "    \"" << toTomlPath(configDir / "camera_hooks.toml") << "\"\n";
+    mf << "    \"" << toTomlPath(configDir / "camera_hooks.toml") << "\",\n";
+    mf << "    \"" << toTomlPath(configDir / "frame_timing_hooks.toml") << "\"\n";
     mf << "]\n";
     mf.close();
 

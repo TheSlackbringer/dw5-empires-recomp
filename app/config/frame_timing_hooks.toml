@@ -1,0 +1,17 @@
+# Frame-time counter (issue 008), see src/dw5e_frame_timing.cpp. The hooks only read the clock; they take no
+# registers and change nothing. Off unless --dw5e_frame_timing=true.
+
+[[midasm_hook]]   # D3D_BlockOnFence 0x822D2FE0 (spins until the GPU passes a fence), after the prologue
+address = 0x822D2FEC
+name = "dw5e_fence_wait_begin"
+registers = []
+
+[[midasm_hook]]   # same function, its single exit (every path ends here): addi r1,r1,0x90; b restore+return
+address = 0x822D30B0
+name = "dw5e_fence_wait_end"
+registers = []
+
+[[midasm_hook]]   # D3D_Swap 0x822DD688 entry: one call per presented game frame
+address = 0x822DD688
+name = "dw5e_frame_swap"
+registers = []

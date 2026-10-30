@@ -32,6 +32,7 @@
 #include <rex/memory.h>
 #include <rex/memory/ring_buffer.h>
 #include <rex/stream.h>
+#include <rex/system/frame_timing.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
 
@@ -216,6 +217,8 @@ void CommandProcessor::WorkerThreadMain() {
       // We've run out of commands to execute.
       // We spin here waiting for new ones, as the overhead of waiting on our
       // event is too high.
+      const uint64_t frame_timing_start =
+          rex::system::frame_timing::enabled() ? rex::chrono::Clock::QueryHostTickCount() : 0;
       PrepareForWait();
       uint32_t loop_count = 0;
       do {
@@ -232,6 +235,10 @@ void CommandProcessor::WorkerThreadMain() {
       } while (worker_running_ && pending_fns_.empty() &&
                (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index));
       ReturnFromWait();
+      if (frame_timing_start) {
+        rex::system::frame_timing::AddGpuWaitForCommands(
+            rex::chrono::Clock::QueryHostTickCount() - frame_timing_start);
+      }
       if (!worker_running_ || !pending_fns_.empty()) {
         continue;
       }
@@ -992,6 +999,8 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(memory::RingBuffer* reade
 
   bool is_memory = (wait_info & 0x10) != 0;
 
+  const uint64_t frame_timing_start =
+      rex::system::frame_timing::enabled() ? rex::chrono::Clock::QueryHostTickCount() : 0;
   bool matched = false;
   do {
     uint32_t value = 0;
@@ -1055,6 +1064,10 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(memory::RingBuffer* reade
     }
   } while (!matched);
 
+  if (frame_timing_start) {
+    rex::system::frame_timing::AddGpuWaitRegMem(rex::chrono::Clock::QueryHostTickCount() -
+                                                frame_timing_start);
+  }
   return true;
 }
 

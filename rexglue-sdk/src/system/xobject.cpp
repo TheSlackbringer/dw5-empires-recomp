@@ -13,6 +13,7 @@
 
 #include <rex/chrono/clock.h>
 #include <rex/stream.h>
+#include <rex/system/frame_timing.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/util/string_utils.h>  // For TranslateAnsiStringAddress
 #include <rex/system/xobject.h>
@@ -207,6 +208,7 @@ X_STATUS XObject::Wait(uint32_t wait_reason, uint32_t processor_mode, uint32_t a
     // Object doesn't support waiting.
     return X_STATUS_SUCCESS;
   }
+  frame_timing::ScopedKernelWait frame_timing_wait;
 
   auto timeout_ms = opt_timeout ? std::chrono::milliseconds(chrono::Clock::ScaleGuestDurationMillis(
                                       TimeoutTicksToMs(*opt_timeout)))
@@ -235,6 +237,7 @@ X_STATUS XObject::Wait(uint32_t wait_reason, uint32_t processor_mode, uint32_t a
 X_STATUS XObject::SignalAndWait(XObject* signal_object, XObject* wait_object, uint32_t wait_reason,
                                 uint32_t processor_mode, uint32_t alertable,
                                 uint64_t* opt_timeout) {
+  frame_timing::ScopedKernelWait frame_timing_wait;
   auto timeout_ms = opt_timeout ? std::chrono::milliseconds(chrono::Clock::ScaleGuestDurationMillis(
                                       TimeoutTicksToMs(*opt_timeout)))
                                 : std::chrono::milliseconds::max();
@@ -262,6 +265,7 @@ X_STATUS XObject::SignalAndWait(XObject* signal_object, XObject* wait_object, ui
 X_STATUS XObject::WaitMultiple(uint32_t count, XObject** objects, uint32_t wait_type,
                                uint32_t wait_reason, uint32_t processor_mode, uint32_t alertable,
                                uint64_t* opt_timeout) {
+  frame_timing::ScopedKernelWait frame_timing_wait;
   std::vector<rex::thread::WaitHandle*> wait_handles(count);
   for (size_t i = 0; i < count; ++i) {
     wait_handles[i] = objects[i]->GetWaitHandle();

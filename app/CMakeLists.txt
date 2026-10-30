@@ -29,6 +29,7 @@ if(DW5E_BUILD_GAME)
         src/dw5e_trace_hooks.cpp
         src/dw5e_snapshot.cpp
         src/dw5e_camera.cpp
+        src/dw5e_frame_timing.cpp
     )
 
     if(WIN32)
@@ -154,6 +155,11 @@ add_executable(dw5e_guest_frame_stats_test tests/guest_frame_stats_test.cpp)
 target_include_directories(dw5e_guest_frame_stats_test PRIVATE
     $<TARGET_PROPERTY:rex::runtime,INTERFACE_INCLUDE_DIRECTORIES>)
 add_test(NAME guest_frame_stats_tests COMMAND dw5e_guest_frame_stats_test)
+
+add_executable(dw5e_frame_timing_test tests/frame_timing_test.cpp)
+target_include_directories(dw5e_frame_timing_test PRIVATE
+    $<TARGET_PROPERTY:rex::runtime,INTERFACE_INCLUDE_DIRECTORIES>)
+add_test(NAME frame_timing_tests COMMAND dw5e_frame_timing_test)
 
 # Compile host diagnostics in CI even when retail game code is unavailable.
 add_library(dw5e_host_portability OBJECT EXCLUDE_FROM_ALL src/dw5e_snapshot.cpp)

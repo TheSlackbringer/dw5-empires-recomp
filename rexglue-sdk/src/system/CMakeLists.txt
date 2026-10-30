@@ -20,6 +20,7 @@ set(REXSYSTEM_SOURCES
     xsymboliclink.cpp
     xobject.cpp
     xmodule.cpp
+    frame_timing.cpp
     guest_path.cpp
 
     # Utilities

@@ -26,6 +26,7 @@
 #include <rex/platform/exceptions.h>
 #include <rex/runtime.h>
 #include <rex/stream.h>
+#include <rex/system/frame_timing.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/thread_state.h>
@@ -998,6 +999,7 @@ uint32_t XThread::SelfSuspend() {
 #endif
 
 X_STATUS XThread::Delay(uint32_t processor_mode, uint32_t alertable, uint64_t interval) {
+  frame_timing::ScopedKernelWait frame_timing_wait;
   int64_t timeout_ticks = interval;
   uint32_t timeout_ms;
   if (timeout_ticks > 0) {

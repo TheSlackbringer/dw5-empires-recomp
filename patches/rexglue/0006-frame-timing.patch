@@ -1,0 +1,299 @@
+diff --git a/include/rex/system/frame_timing.h b/include/rex/system/frame_timing.h
+new file mode 100644
+index 00000000..6240cea2
+--- /dev/null
++++ b/include/rex/system/frame_timing.h
+@@ -0,0 +1,113 @@
++/**
++ * @file        system/frame_timing.h
++ * @brief       Debug aid: where each guest frame's time goes (game work, waits, GPU thread).
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ */
++
++#pragma once
++
++#include <algorithm>
++#include <cstdint>
++#include <vector>
++
++namespace rex::system::frame_timing {
++
++// Off until Enable(); while off every recording call returns at once. Times are host ticks
++// (chrono::Clock::QueryHostTickCount).
++void Enable();
++bool enabled();
++
++// Time the calling thread has spent in guest kernel waits (XObject waits, XThread::Delay) since
++// Enable(). Recorded by ScopedKernelWait.
++uint64_t ThreadKernelWaitTicks();
++
++class ScopedKernelWait {
++ public:
++  ScopedKernelWait();
++  ~ScopedKernelWait();
++  ScopedKernelWait(const ScopedKernelWait&) = delete;
++  ScopedKernelWait& operator=(const ScopedKernelWait&) = delete;
++
++ private:
++  uint64_t start_ = 0;
++};
++
++// GPU command processor thread: time waiting for new commands from the guest, and time inside
++// WAIT_REG_MEM. Totals since Enable().
++void AddGpuWaitForCommands(uint64_t ticks);
++void AddGpuWaitRegMem(uint64_t ticks);
++struct GpuWaitTotals {
++  uint64_t for_commands = 0;
++  uint64_t reg_mem = 0;
++};
++GpuWaitTotals gpu_wait_totals();
++
++// Averages per frame over one report window.
++struct Report {
++  uint32_t frames = 0;
++  double seconds = 0;
++  double frame_ms = 0;
++  double p95_ms = 0;
++  double work_ms = 0;    // frame - fence wait - kernel wait
++  double fence_ms = 0;   // guest spin on GPU fences
++  double kernel_ms = 0;  // guest kernel waits
++  double gpu_busy_ms = 0;  // window - GPU waits
++  double gpu_wait_commands_ms = 0;
++  double gpu_wait_reg_mem_ms = 0;
++};
++
++// Collects the frames of the presenting guest thread and closes a report once at least one
++// second of frames has been added. Single-threaded: call from the presenting thread only.
++class Window {
++ public:
++  // `frame` = time since the previous frame, `fence` and `kernel` = waits within it, `gpu` =
++  // GPU wait totals now. Returns true and fills `out` when a window closes.
++  bool AddFrame(uint64_t frame, uint64_t fence, uint64_t kernel, const GpuWaitTotals& gpu,
++                uint64_t tick_frequency, Report* out) {
++    if (!started_) {
++      started_ = true;
++      gpu_start_ = gpu;
++    }
++    frames_.push_back(frame);
++    frame_sum_ += frame;
++    fence_sum_ += fence;
++    kernel_sum_ += kernel;
++    if (!tick_frequency || frame_sum_ < tick_frequency) {
++      return false;
++    }
++    const double ms_per_tick = 1000.0 / static_cast<double>(tick_frequency);
++    const double n = static_cast<double>(frames_.size());
++    Report r;
++    r.frames = static_cast<uint32_t>(frames_.size());
++    r.seconds = static_cast<double>(frame_sum_) / static_cast<double>(tick_frequency);
++    r.frame_ms = frame_sum_ * ms_per_tick / n;
++    r.fence_ms = fence_sum_ * ms_per_tick / n;
++    r.kernel_ms = kernel_sum_ * ms_per_tick / n;
++    r.work_ms = r.frame_ms - r.fence_ms - r.kernel_ms;
++    const size_t p95 = std::min(frames_.size() - 1, frames_.size() * 95 / 100);
++    std::nth_element(frames_.begin(), frames_.begin() + p95, frames_.end());
++    r.p95_ms = frames_[p95] * ms_per_tick;
++    const uint64_t gpu_cmd = gpu.for_commands - gpu_start_.for_commands;
++    const uint64_t gpu_reg = gpu.reg_mem - gpu_start_.reg_mem;
++    r.gpu_wait_commands_ms = gpu_cmd * ms_per_tick / n;
++    r.gpu_wait_reg_mem_ms = gpu_reg * ms_per_tick / n;
++    r.gpu_busy_ms = r.frame_ms - r.gpu_wait_commands_ms - r.gpu_wait_reg_mem_ms;
++    *out = r;
++    frames_.clear();
++    frame_sum_ = fence_sum_ = kernel_sum_ = 0;
++    gpu_start_ = gpu;
++    return true;
++  }
++
++ private:
++  bool started_ = false;
++  std::vector<uint64_t> frames_;
++  uint64_t frame_sum_ = 0;
++  uint64_t fence_sum_ = 0;
++  uint64_t kernel_sum_ = 0;
++  GpuWaitTotals gpu_start_;
++};
++
++}  // namespace rex::system::frame_timing
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index c1ef1641..13f1613a 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -32,6 +32,7 @@
+ #include <rex/memory.h>
+ #include <rex/memory/ring_buffer.h>
+ #include <rex/stream.h>
++#include <rex/system/frame_timing.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/user_module.h>
+ 
+@@ -216,6 +217,8 @@ void CommandProcessor::WorkerThreadMain() {
+       // We've run out of commands to execute.
+       // We spin here waiting for new ones, as the overhead of waiting on our
+       // event is too high.
++      const uint64_t frame_timing_start =
++          rex::system::frame_timing::enabled() ? rex::chrono::Clock::QueryHostTickCount() : 0;
+       PrepareForWait();
+       uint32_t loop_count = 0;
+       do {
+@@ -232,6 +235,10 @@ void CommandProcessor::WorkerThreadMain() {
+       } while (worker_running_ && pending_fns_.empty() &&
+                (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index));
+       ReturnFromWait();
++      if (frame_timing_start) {
++        rex::system::frame_timing::AddGpuWaitForCommands(
++            rex::chrono::Clock::QueryHostTickCount() - frame_timing_start);
++      }
+       if (!worker_running_ || !pending_fns_.empty()) {
+         continue;
+       }
+@@ -992,6 +999,8 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(memory::RingBuffer* reade
+ 
+   bool is_memory = (wait_info & 0x10) != 0;
+ 
++  const uint64_t frame_timing_start =
++      rex::system::frame_timing::enabled() ? rex::chrono::Clock::QueryHostTickCount() : 0;
+   bool matched = false;
+   do {
+     uint32_t value = 0;
+@@ -1055,6 +1064,10 @@ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(memory::RingBuffer* reade
+     }
+   } while (!matched);
+ 
++  if (frame_timing_start) {
++    rex::system::frame_timing::AddGpuWaitRegMem(rex::chrono::Clock::QueryHostTickCount() -
++                                                frame_timing_start);
++  }
+   return true;
+ }
+ 
+diff --git a/src/system/CMakeLists.txt b/src/system/CMakeLists.txt
+index 1c5f0904..b9e3c60a 100644
+--- a/src/system/CMakeLists.txt
++++ b/src/system/CMakeLists.txt
+@@ -20,6 +20,7 @@ set(REXSYSTEM_SOURCES
+     xsymboliclink.cpp
+     xobject.cpp
+     xmodule.cpp
++    frame_timing.cpp
+     guest_path.cpp
+ 
+     # Utilities
+diff --git a/src/system/frame_timing.cpp b/src/system/frame_timing.cpp
+new file mode 100644
+index 00000000..5acef8c4
+--- /dev/null
++++ b/src/system/frame_timing.cpp
+@@ -0,0 +1,54 @@
++/**
++ * @file        system/frame_timing.cpp
++ * @brief       Debug aid: where each guest frame's time goes (see frame_timing.h).
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ */
++
++#include <rex/system/frame_timing.h>
++
++#include <atomic>
++
++#include <rex/chrono/clock.h>
++
++namespace rex::system::frame_timing {
++
++namespace {
++std::atomic<bool> enabled_{false};
++std::atomic<uint64_t> gpu_wait_for_commands_{0};
++std::atomic<uint64_t> gpu_wait_reg_mem_{0};
++thread_local uint64_t thread_kernel_wait_ticks_ = 0;
++}  // namespace
++
++void Enable() { enabled_.store(true, std::memory_order_relaxed); }
++bool enabled() { return enabled_.load(std::memory_order_relaxed); }
++
++uint64_t ThreadKernelWaitTicks() { return thread_kernel_wait_ticks_; }
++
++ScopedKernelWait::ScopedKernelWait() {
++  if (enabled()) {
++    start_ = chrono::Clock::QueryHostTickCount();
++  }
++}
++
++ScopedKernelWait::~ScopedKernelWait() {
++  if (start_) {
++    thread_kernel_wait_ticks_ += chrono::Clock::QueryHostTickCount() - start_;
++  }
++}
++
++void AddGpuWaitForCommands(uint64_t ticks) {
++  gpu_wait_for_commands_.fetch_add(ticks, std::memory_order_relaxed);
++}
++
++void AddGpuWaitRegMem(uint64_t ticks) {
++  gpu_wait_reg_mem_.fetch_add(ticks, std::memory_order_relaxed);
++}
++
++GpuWaitTotals gpu_wait_totals() {
++  return {gpu_wait_for_commands_.load(std::memory_order_relaxed),
++          gpu_wait_reg_mem_.load(std::memory_order_relaxed)};
++}
++
++}  // namespace rex::system::frame_timing
+diff --git a/src/system/xobject.cpp b/src/system/xobject.cpp
+index 0743cfc3..e19ed24d 100644
+--- a/src/system/xobject.cpp
++++ b/src/system/xobject.cpp
+@@ -13,6 +13,7 @@
+ 
+ #include <rex/chrono/clock.h>
+ #include <rex/stream.h>
++#include <rex/system/frame_timing.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/util/string_utils.h>  // For TranslateAnsiStringAddress
+ #include <rex/system/xobject.h>
+@@ -207,6 +208,7 @@ X_STATUS XObject::Wait(uint32_t wait_reason, uint32_t processor_mode, uint32_t a
+     // Object doesn't support waiting.
+     return X_STATUS_SUCCESS;
+   }
++  frame_timing::ScopedKernelWait frame_timing_wait;
+ 
+   auto timeout_ms = opt_timeout ? std::chrono::milliseconds(chrono::Clock::ScaleGuestDurationMillis(
+                                       TimeoutTicksToMs(*opt_timeout)))
+@@ -235,6 +237,7 @@ X_STATUS XObject::Wait(uint32_t wait_reason, uint32_t processor_mode, uint32_t a
+ X_STATUS XObject::SignalAndWait(XObject* signal_object, XObject* wait_object, uint32_t wait_reason,
+                                 uint32_t processor_mode, uint32_t alertable,
+                                 uint64_t* opt_timeout) {
++  frame_timing::ScopedKernelWait frame_timing_wait;
+   auto timeout_ms = opt_timeout ? std::chrono::milliseconds(chrono::Clock::ScaleGuestDurationMillis(
+                                       TimeoutTicksToMs(*opt_timeout)))
+                                 : std::chrono::milliseconds::max();
+@@ -262,6 +265,7 @@ X_STATUS XObject::SignalAndWait(XObject* signal_object, XObject* wait_object, ui
+ X_STATUS XObject::WaitMultiple(uint32_t count, XObject** objects, uint32_t wait_type,
+                                uint32_t wait_reason, uint32_t processor_mode, uint32_t alertable,
+                                uint64_t* opt_timeout) {
++  frame_timing::ScopedKernelWait frame_timing_wait;
+   std::vector<rex::thread::WaitHandle*> wait_handles(count);
+   for (size_t i = 0; i < count; ++i) {
+     wait_handles[i] = objects[i]->GetWaitHandle();
+diff --git a/src/system/xthread.cpp b/src/system/xthread.cpp
+index 77bce256..2733eced 100644
+--- a/src/system/xthread.cpp
++++ b/src/system/xthread.cpp
+@@ -26,6 +26,7 @@
+ #include <rex/platform/exceptions.h>
+ #include <rex/runtime.h>
+ #include <rex/stream.h>
++#include <rex/system/frame_timing.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/function_dispatcher.h>
+ #include <rex/system/thread_state.h>
+@@ -998,6 +999,7 @@ uint32_t XThread::SelfSuspend() {
+ #endif
+ 
+ X_STATUS XThread::Delay(uint32_t processor_mode, uint32_t alertable, uint64_t interval) {
++  frame_timing::ScopedKernelWait frame_timing_wait;
+   int64_t timeout_ticks = interval;
+   uint32_t timeout_ms;
+   if (timeout_ticks > 0) {

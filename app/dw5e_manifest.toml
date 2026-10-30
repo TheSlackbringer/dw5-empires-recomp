@@ -8,5 +8,5 @@ game_root = "../game/files"
 [entrypoint]
 file_path = "../game/files/default.xex"
 out_directory_path = "generated/default"
-includes = ["config/functions.toml", "config/trace_hooks.toml", "config/camera_hooks.toml"]
+includes = ["config/functions.toml", "config/trace_hooks.toml", "config/camera_hooks.toml", "config/frame_timing_hooks.toml"]
 
