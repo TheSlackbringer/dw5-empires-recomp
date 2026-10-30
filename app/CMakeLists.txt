@@ -30,6 +30,7 @@ if(DW5E_BUILD_GAME)
         src/dw5e_snapshot.cpp
         src/dw5e_camera.cpp
         src/dw5e_frame_timing.cpp
+        src/dw5e_pacing.cpp
     )
 
     if(WIN32)

@@ -1,0 +1,6 @@
+# Game pacing on shared CPU cores (issue 006 v3 part A), see src/dw5e_pacing.cpp.
+
+[[midasm_hook]]   # D3D_BlockOnFence 0x822D2FE0 spin loop, top of each round: addi r3,r1,0x50 before bl 0x822DAB38
+address = 0x822D3074
+name = "dw5e_fence_spin_yield"
+registers = []
