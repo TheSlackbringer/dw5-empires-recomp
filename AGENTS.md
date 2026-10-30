@@ -101,8 +101,9 @@ Ghidra, pitfalls): "Reference" at the end of this file.
   measurements with their test hardware; do not generalize one machine's timings or introduce machine-specific
   fixes. Correctness is defined by Xbox 360 behaviour.
 - **The user's desktop is off limits:** never send synthetic input to it, never screenshot it (use frame dumps or
-  logs), never unlock it. Starting the game opens a visible window on Windows: visible windows only for a manual
-  test session or when asked.
+  logs), never unlock it. **Exception — the game window (owner, 2026-10-29):** for tests, agents may start the game,
+  capture the game window only and send keyboard input only while the game window has focus (Windows helpers:
+  `notes/issues/tests/tools/`). Nothing else on the desktop is touched.
 - **One game at a time;** no builds or test runs while the user has a game window open. Test runs use
   `--audio_mute=true`; live play uses the default output. Never change the user's audio defaults.
 - **Downloads need explicit permission** (name, source, size).
@@ -144,7 +145,9 @@ Ghidra, pitfalls): "Reference" at the end of this file.
 ### Repository map
 - `rexglue-sdk/` — vendored ReXGlue SDK v0.10.0 (BSD-style licence, parts derived from Xenia) with our fixes
   applied; each fix is also kept as a patch in `patches/rexglue/` (`0001-dw5e-runtime-fixes`, `0002-windows-export-
-  and-dxc-compat`, `0003-windows-gpu-plugin-name`). Key areas: `src/kernel/` (xboxkrnl/XAM HLE), `src/system/`
+  and-dxc-compat`, `0003-windows-gpu-plugin-name`, `0004-guest-frame-stats` (F3 shows the game's own frame rate),
+  `0005-mspack-real-sources` (mspack built from its real folder, not the symlinks a Windows checkout stores as
+  text)). Key areas: `src/kernel/` (xboxkrnl/XAM HLE), `src/system/`
   (threads, objects, function dispatcher), `src/graphics/` (GPU system, command processor, `xenos` plugin),
   `src/ui/` (presenters D3D12/Vulkan, debug overlay), `src/audio/` (XMA, SDL output), `src/core/` (cvars, logging,
   perf counters), `thirdparty/` (SDL3, FFmpeg, Tracy, …).
