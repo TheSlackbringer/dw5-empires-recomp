@@ -60,7 +60,7 @@ jobs:
 
       - name: Build setup wizard, tests & ReXGlue recompiler
         run: |
-          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test dw5e_keyboard_test dw5e_vulkan_startup_test rexgpu-xenos rexglue -j$(nproc)
+          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test dw5e_keyboard_test dw5e_vulkan_startup_test dw5e_guest_frame_stats_test dw5e_frame_timing_test rexgpu-xenos rexglue -j$(nproc)
 
       - name: Run unit tests
         run: |
@@ -210,7 +210,7 @@ jobs:
 
       - name: Build Windows setup wizard & ReXGlue recompiler
         run: |
-          cmake --build app/build-windows --target dw5e_dxc_uuid_test dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test dw5e_keyboard_test rexgpu-xenos rexglue -j$(nproc)
+          cmake --build app/build-windows --target dw5e_dxc_uuid_test dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test dw5e_keyboard_test dw5e_guest_frame_stats_test dw5e_frame_timing_test rexgpu-xenos rexglue -j$(nproc)
 
       - name: Package Windows compiler zip
         env:
