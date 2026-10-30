@@ -82,6 +82,11 @@ if(DW5E_BUILD_SETUP)
     endif()
 
     set_target_properties(dw5e_setup PROPERTIES OUTPUT_NAME "DW5E")
+    if(WIN32 AND DW5E_BUILD_GAME)
+        # Windows file names ignore case: DW5E.exe and the game's dw5e.exe would be one file.
+        set_target_properties(dw5e_setup PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/setup")
+    endif()
 
     target_include_directories(dw5e_setup PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/setup

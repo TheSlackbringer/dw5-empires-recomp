@@ -97,6 +97,15 @@ class WindowsPackageTest(unittest.TestCase):
         self.assertEqual(checksum.read_text(),
                          f"{release.sha256(archive)}  {archive.name}\n")
 
+    def test_setup_folder_launcher_wins_over_game_in_combined_build(self):
+        # A Windows build with the game puts the setup in setup/; build/DW5E.exe is then the game.
+        (self.build / "DW5E.exe").write_bytes(b"MZsynthetic game")
+        (self.build / "setup").mkdir()
+        (self.build / "setup/DW5E.exe").write_bytes(b"MZsynthetic setup")
+        self.compiler("rexglue.exe")
+        with zipfile.ZipFile(self.package()) as contents:
+            self.assertEqual(contents.read("DW5E-fixture-windows-x64/DW5E.exe"), b"MZsynthetic setup")
+
     def test_missing_compiler_stops_packaging(self):
         with self.assertRaisesRegex(SystemExit, "(?i)recompiler|rexglue"):
             self.package()

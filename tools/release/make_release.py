@@ -266,7 +266,11 @@ def sha256(path):
 
 
 def windows(build, recomp_build, test):
-    launcher = build / 'DW5E.exe'
+    # A Windows build that also builds the game puts the setup in setup/: there build/DW5E.exe is the game's
+    # dw5e.exe (file names ignore case).
+    launcher = build / 'setup' / 'DW5E.exe'
+    if not launcher.exists():
+        launcher = build / 'DW5E.exe'
     if not launcher.exists():
         launcher = build / 'dw5e_setup.exe'
     win_candidates = [

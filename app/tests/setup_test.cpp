@@ -195,6 +195,14 @@ void testSyncDirectorySymlinks(const fs::path &tempDir)
     fs::create_directories(src / "clang" / "bin", ec);
     std::ofstream(src / "clang" / "bin" / "run-tool") << "#!/bin/sh\nexit 0\n";
     fs::create_symlink("run-tool", src / "clang" / "bin" / "clang", ec);
+    if (ec) {
+        // Windows allows symlinks only with Developer Mode or admin rights; the sync of real
+        // symlinks cannot be exercised without them.
+        std::cout << "SKIP testSyncDirectorySymlinks: this system does not allow creating symlinks ("
+                  << ec.message() << ")" << std::endl;
+        fs::remove_all(src, ec);
+        return;
+    }
     fs::create_symlink("run-tool", src / "clang" / "bin" / "ninja", ec);
     fs::create_symlink("clang/bin/ninja", src / "ninja", ec);
 
