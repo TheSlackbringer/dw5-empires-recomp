@@ -331,6 +331,15 @@ void GraphicsSystem::MarkVblank() {
   DispatchInterruptCallback(0, 2);
 }
 
+void GraphicsSystem::RecordGuestSwap() {
+  guest_frame_meter_.RecordSwap(chrono::Clock::QueryHostTickCount());
+}
+
+system::GuestFrameStats GraphicsSystem::guest_frame_stats() const {
+  return guest_frame_meter_.Stats(chrono::Clock::QueryHostTickCount(),
+                                  chrono::Clock::QueryHostTickFrequency());
+}
+
 void GraphicsSystem::ClearCaches() {
   command_processor_->CallInThread([&]() { command_processor_->ClearCaches(); });
 }

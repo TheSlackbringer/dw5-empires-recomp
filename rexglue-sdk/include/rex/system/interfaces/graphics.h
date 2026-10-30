@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <filesystem>
 
+#include <rex/system/guest_frame_stats.h>
 #include <rex/system/xtypes.h>
 
 // Forward declarations
@@ -70,6 +71,9 @@ class IGraphicsSystem {
     (void)ptr;
     (void)block_size_log2;
   }
+
+  // Guest frame rate (guest swaps) for the debug overlay. Default: no frames.
+  virtual GuestFrameStats guest_frame_stats() const { return {}; }
 
   // Persistent shader/pipeline storage under the cache root. Default: none.
   virtual void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,

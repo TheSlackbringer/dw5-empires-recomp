@@ -144,6 +144,12 @@ add_executable(dw5e_safe_read_test tests/safe_read_test.cpp)
 target_include_directories(dw5e_safe_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME snapshot_safe_read_tests COMMAND dw5e_safe_read_test)
 
+# Header-only guest frame rate used by the F3 overlay (issue 007); SDK headers only, no runtime link.
+add_executable(dw5e_guest_frame_stats_test tests/guest_frame_stats_test.cpp)
+target_include_directories(dw5e_guest_frame_stats_test PRIVATE
+    $<TARGET_PROPERTY:rex::runtime,INTERFACE_INCLUDE_DIRECTORIES>)
+add_test(NAME guest_frame_stats_tests COMMAND dw5e_guest_frame_stats_test)
+
 # Compile host diagnostics in CI even when retail game code is unavailable.
 add_library(dw5e_host_portability OBJECT EXCLUDE_FROM_ALL src/dw5e_snapshot.cpp)
 target_link_libraries(dw5e_host_portability PRIVATE rex::runtime)

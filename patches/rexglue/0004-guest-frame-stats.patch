@@ -1,0 +1,217 @@
+diff --git a/include/rex/graphics/graphics_system.h b/include/rex/graphics/graphics_system.h
+index ac6b056e..cfad5622 100644
+--- a/include/rex/graphics/graphics_system.h
++++ b/include/rex/graphics/graphics_system.h
+@@ -83,6 +83,10 @@ class GraphicsSystem : public system::IGraphicsSystem {
+   void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,
+                                bool blocking) override;
+ 
++  // One guest swap (XE_SWAP, from VdSwap) is one game frame.
++  void RecordGuestSwap();
++  system::GuestFrameStats guest_frame_stats() const override;
++
+   bool is_paused() const { return paused_; }
+   void Pause();
+   void Resume();
+@@ -130,6 +134,8 @@ class GraphicsSystem : public system::IGraphicsSystem {
+   std::unique_ptr<::rex::ui::Presenter> presenter_;
+ 
+   std::atomic_flag host_gpu_loss_reported_;
++
++  system::GuestFrameRateMeter guest_frame_meter_;
+ };
+ 
+ }  // namespace rex::graphics
+diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
+index 1f524802..45e54559 100644
+--- a/include/rex/rex_app.h
++++ b/include/rex/rex_app.h
+@@ -258,10 +258,12 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
+   const std::filesystem::path& cache_root() const { return cache_root_; }
+   const std::filesystem::path& metadata_root() const { return metadata_root_; }
+ 
+-  /// Set a callback that provides guest frame stats to the debug overlay.
++  /// Set a callback that provides guest frame stats to the debug overlay. Without one, the overlay
++  /// shows the graphics system's guest swap rate.
+   void SetGuestFrameStats(ui::DebugOverlayDialog::FrameStatsProvider provider);
+ 
+  private:
++  ui::DebugOverlayDialog::FrameStatsProvider EffectiveFrameStatsProvider();
+   std::function<void(PathConfig)> MakeResumeCallback();
+ 
+   // Stand up the ImGui overlay stack (drawer, F3/Backtick/F4 binds, dialogs)
+diff --git a/include/rex/system/guest_frame_stats.h b/include/rex/system/guest_frame_stats.h
+new file mode 100644
+index 00000000..8a3242af
+--- /dev/null
++++ b/include/rex/system/guest_frame_stats.h
+@@ -0,0 +1,71 @@
++/**
++ * @file        system/guest_frame_stats.h
++ * @brief       Guest frame rate for the debug overlay: one guest swap (VdSwap) is one game frame.
++ *
++ * @license     BSD 3-Clause License
++ *              See LICENSE file in the project root for full license text.
++ */
++
++#pragma once
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <mutex>
++
++namespace rex::system {
++
++struct GuestFrameStats {
++  double fps = 0;            // guest swaps per second over the last second
++  double frame_time_ms = 0;  // average time between those swaps
++  uint64_t frame_count = 0;  // guest swaps since start
++};
++
++// Counts guest swaps and averages their rate over the last second. RecordSwap runs on the GPU
++// command processor thread, Stats on the UI thread. Times are host ticks (any monotonic clock).
++class GuestFrameRateMeter {
++ public:
++  void RecordSwap(uint64_t now_ticks) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    ticks_[count_ % kCapacity] = now_ticks;
++    ++count_;
++  }
++
++  GuestFrameStats Stats(uint64_t now_ticks, uint64_t tick_frequency) const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    GuestFrameStats stats;
++    stats.frame_count = count_;
++    if (!tick_frequency) {
++      return stats;
++    }
++    // Swaps within the last second, newest first; the ring bounds the window at high rates.
++    uint64_t newest = 0, oldest = 0;
++    size_t in_window = 0;
++    size_t available = count_ < kCapacity ? static_cast<size_t>(count_) : kCapacity;
++    for (size_t i = 0; i < available; ++i) {
++      uint64_t t = ticks_[(count_ - 1 - i) % kCapacity];
++      if (t > now_ticks || now_ticks - t > tick_frequency) {
++        break;
++      }
++      if (!in_window) {
++        newest = t;
++      }
++      oldest = t;
++      ++in_window;
++    }
++    if (in_window >= 2 && newest > oldest) {
++      double span_s = double(newest - oldest) / double(tick_frequency);
++      stats.fps = double(in_window - 1) / span_s;
++      stats.frame_time_ms = 1000.0 / stats.fps;
++    }
++    return stats;
++  }
++
++ private:
++  static constexpr size_t kCapacity = 256;
++  mutable std::mutex mutex_;
++  std::array<uint64_t, kCapacity> ticks_{};
++  uint64_t count_ = 0;
++};
++
++}  // namespace rex::system
+diff --git a/include/rex/system/interfaces/graphics.h b/include/rex/system/interfaces/graphics.h
+index d54df866..0a365426 100644
+--- a/include/rex/system/interfaces/graphics.h
++++ b/include/rex/system/interfaces/graphics.h
+@@ -14,6 +14,7 @@
+ #include <cstdint>
+ #include <filesystem>
+ 
++#include <rex/system/guest_frame_stats.h>
+ #include <rex/system/xtypes.h>
+ 
+ // Forward declarations
+@@ -71,6 +72,9 @@ class IGraphicsSystem {
+     (void)block_size_log2;
+   }
+ 
++  // Guest frame rate (guest swaps) for the debug overlay. Default: no frames.
++  virtual GuestFrameStats guest_frame_stats() const { return {}; }
++
+   // Persistent shader/pipeline storage under the cache root. Default: none.
+   virtual void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,
+                                        bool blocking) {
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index a7443756..c1ef1641 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -944,6 +944,9 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
+   }
+ #endif
+   rex::perf::Profiler::Flip();
++  if (graphics_system_) {
++    graphics_system_->RecordGuestSwap();
++  }
+ 
+   // Xenia-specific VdSwap hook.
+   // VdSwap will post this to tell us we need to swap the screen/fire an
+diff --git a/src/graphics/graphics_system.cpp b/src/graphics/graphics_system.cpp
+index 8f2fcb0b..da8c82ca 100644
+--- a/src/graphics/graphics_system.cpp
++++ b/src/graphics/graphics_system.cpp
+@@ -331,6 +331,15 @@ void GraphicsSystem::MarkVblank() {
+   DispatchInterruptCallback(0, 2);
+ }
+ 
++void GraphicsSystem::RecordGuestSwap() {
++  guest_frame_meter_.RecordSwap(chrono::Clock::QueryHostTickCount());
++}
++
++system::GuestFrameStats GraphicsSystem::guest_frame_stats() const {
++  return guest_frame_meter_.Stats(chrono::Clock::QueryHostTickCount(),
++                                  chrono::Clock::QueryHostTickFrequency());
++}
++
+ void GraphicsSystem::ClearCaches() {
+   command_processor_->CallInThread([&]() { command_processor_->ClearCaches(); });
+ }
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+index b94fe9e4..0a451725 100644
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -398,8 +398,8 @@ void ReXApp::SetupOverlays(rex::ui::Presenter* presenter, rex::ui::ImmediateDraw
+     if (debug_overlay_) {
+       debug_overlay_.reset();
+     } else {
+-      debug_overlay_ =
+-          std::make_unique<ui::DebugOverlayDialog>(imgui_drawer_.get(), frame_stats_provider_);
++      debug_overlay_ = std::make_unique<ui::DebugOverlayDialog>(imgui_drawer_.get(),
++                                                                EffectiveFrameStatsProvider());
+     }
+   });
+   rex::ui::RegisterBind("bind_console", "Backtick", "Toggle console overlay", [this] {
+@@ -609,8 +609,25 @@ void ReXApp::OnDestroy() {
+ void ReXApp::SetGuestFrameStats(ui::DebugOverlayDialog::FrameStatsProvider provider) {
+   frame_stats_provider_ = provider;
+   if (debug_overlay_) {
+-    debug_overlay_->SetStatsProvider(provider);
++    debug_overlay_->SetStatsProvider(EffectiveFrameStatsProvider());
+   }
+ }
+ 
++ui::DebugOverlayDialog::FrameStatsProvider ReXApp::EffectiveFrameStatsProvider() {
++  if (frame_stats_provider_) {
++    return frame_stats_provider_;
++  }
++  // Default: the graphics system's guest swap rate (one VdSwap per game frame).
++  return [this]() {
++    ui::FrameStats stats;
++    if (runtime_ && runtime_->graphics_system()) {
++      auto guest = runtime_->graphics_system()->guest_frame_stats();
++      stats.fps = guest.fps;
++      stats.frame_time_ms = guest.frame_time_ms;
++      stats.frame_count = guest.frame_count;
++    }
++    return stats;
++  };
++}
++
+ }  // namespace rex

@@ -258,10 +258,12 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   const std::filesystem::path& cache_root() const { return cache_root_; }
   const std::filesystem::path& metadata_root() const { return metadata_root_; }
 
-  /// Set a callback that provides guest frame stats to the debug overlay.
+  /// Set a callback that provides guest frame stats to the debug overlay. Without one, the overlay
+  /// shows the graphics system's guest swap rate.
   void SetGuestFrameStats(ui::DebugOverlayDialog::FrameStatsProvider provider);
 
  private:
+  ui::DebugOverlayDialog::FrameStatsProvider EffectiveFrameStatsProvider();
   std::function<void(PathConfig)> MakeResumeCallback();
 
   // Stand up the ImGui overlay stack (drawer, F3/Backtick/F4 binds, dialogs)

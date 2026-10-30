@@ -398,8 +398,8 @@ void ReXApp::SetupOverlays(rex::ui::Presenter* presenter, rex::ui::ImmediateDraw
     if (debug_overlay_) {
       debug_overlay_.reset();
     } else {
-      debug_overlay_ =
-          std::make_unique<ui::DebugOverlayDialog>(imgui_drawer_.get(), frame_stats_provider_);
+      debug_overlay_ = std::make_unique<ui::DebugOverlayDialog>(imgui_drawer_.get(),
+                                                                EffectiveFrameStatsProvider());
     }
   });
   rex::ui::RegisterBind("bind_console", "Backtick", "Toggle console overlay", [this] {
@@ -609,8 +609,25 @@ void ReXApp::OnDestroy() {
 void ReXApp::SetGuestFrameStats(ui::DebugOverlayDialog::FrameStatsProvider provider) {
   frame_stats_provider_ = provider;
   if (debug_overlay_) {
-    debug_overlay_->SetStatsProvider(provider);
+    debug_overlay_->SetStatsProvider(EffectiveFrameStatsProvider());
   }
+}
+
+ui::DebugOverlayDialog::FrameStatsProvider ReXApp::EffectiveFrameStatsProvider() {
+  if (frame_stats_provider_) {
+    return frame_stats_provider_;
+  }
+  // Default: the graphics system's guest swap rate (one VdSwap per game frame).
+  return [this]() {
+    ui::FrameStats stats;
+    if (runtime_ && runtime_->graphics_system()) {
+      auto guest = runtime_->graphics_system()->guest_frame_stats();
+      stats.fps = guest.fps;
+      stats.frame_time_ms = guest.frame_time_ms;
+      stats.frame_count = guest.frame_count;
+    }
+    return stats;
+  };
 }
 
 }  // namespace rex

@@ -83,6 +83,10 @@ class GraphicsSystem : public system::IGraphicsSystem {
   void InitializeShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id,
                                bool blocking) override;
 
+  // One guest swap (XE_SWAP, from VdSwap) is one game frame.
+  void RecordGuestSwap();
+  system::GuestFrameStats guest_frame_stats() const override;
+
   bool is_paused() const { return paused_; }
   void Pause();
   void Resume();
@@ -130,6 +134,8 @@ class GraphicsSystem : public system::IGraphicsSystem {
   std::unique_ptr<::rex::ui::Presenter> presenter_;
 
   std::atomic_flag host_gpu_loss_reported_;
+
+  system::GuestFrameRateMeter guest_frame_meter_;
 };
 
 }  // namespace rex::graphics
