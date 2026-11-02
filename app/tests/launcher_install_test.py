@@ -134,6 +134,8 @@ class LauncherInstallTests(unittest.TestCase):
         self.assertEqual(hashes(self.home), self.original_user, 'no writes to platform user-data roots')
 
     def installed(self, root):
+        # A complete installed fixture includes setup logs. Linux fast launch appends to this file.
+        put(root / 'logs/game.log', '')
         put(root / 'game/installed.txt', 'authored synthetic marker\n')
         put(root / 'game/files/default.xex', 'authored synthetic non-retail bytes\n')
         put(root / 'save/sentinel', 'save bytes that must survive\n')
@@ -245,7 +247,8 @@ class LauncherInstallTests(unittest.TestCase):
         self.launch('--no-window', '--rebuild')
         self.assertFalse((moved / 'build/CMakeFiles/obsolete').exists())
         self.assertEqual((moved / 'build/_deps/keep').read_text(encoding='utf-8'), 'dependency sentinel')
-        self.assertIn(str(moved / 'app').replace('\\', '/'), (moved / 'build/CMakeCache.txt').read_text(encoding='utf-8').replace('\\', '/'))
+        source = moved / ('app' if os.name == 'nt' else 'builder/app')
+        self.assertIn(str(source).replace('\\', '/'), (moved / 'build/CMakeCache.txt').read_text(encoding='utf-8').replace('\\', '/'))
         self.assertEqual(self.sentinels(moved), original)
         self.assertEqual((moved / 'dw5e_manifest.toml').read_bytes(), self.source_manifest)
         self.check_game(self.launch(game=True), moved)
