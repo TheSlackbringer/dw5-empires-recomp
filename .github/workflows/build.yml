@@ -5,6 +5,11 @@ on:
     branches: [main, 'ci/**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      test_release:
+        description: Create a separate draft release for testing this branch
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -317,7 +322,7 @@ jobs:
   draft:
     name: Update Draft Release
     needs: [clean-room-check, linux, linux-native, windows, windows-native]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.test_release))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -328,7 +333,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
       COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+      RELEASE_TAG: ${{ github.ref != 'refs/heads/main' && format('test-{0}-{1}', github.run_id, github.run_attempt) || '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Download Windows package artifact
