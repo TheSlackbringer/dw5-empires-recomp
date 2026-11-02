@@ -1,4 +1,5 @@
 #include "build_game.h"
+#include "install_location.h"
 #include "run_process.h"
 
 #include <chrono>
@@ -14,7 +15,7 @@ namespace fs = std::filesystem;
 namespace {
 std::string utf8(const fs::path &path)
 {
-    return path.generic_string();
+    return pathText(path);
 }
 
 std::string readText(const fs::path &path)
@@ -139,7 +140,7 @@ bool resetBuildIfMoved(const fs::path &buildDir, const fs::path &sourceDir)
         return {};
     };
 
-    bool needReset = configured.empty() || normal(fs::path(configured)) != normal(sourceDir);
+    bool needReset = configured.empty() || normal(pathFromText(configured)) != normal(sourceDir);
 
     if (!needReset)
     {
@@ -219,7 +220,7 @@ bool buildGame(const fs::path &root,
     }
     if (configure.exitCode != 0)
     {
-        error = "configuring the build failed; check log at " + logFile.string();
+        error = "configuring the build failed; check log at " + pathText(logFile);
         return false;
     }
 
@@ -239,7 +240,7 @@ bool buildGame(const fs::path &root,
     }
     if (build.exitCode != 0)
     {
-        error = "compiling the game failed; check log at " + logFile.string();
+        error = "compiling the game failed; check log at " + pathText(logFile);
         return false;
     }
 
@@ -256,7 +257,7 @@ bool buildGame(const fs::path &root,
             executable = buildDir / "bin" / executable.filename();
         else
         {
-            error = "build succeeded but executable missing at " + executable.string();
+            error = "build succeeded but executable missing at " + pathText(executable);
             return false;
         }
     }
@@ -267,7 +268,7 @@ bool buildGame(const fs::path &root,
         fs::copy_file(source, target, fs::copy_options::overwrite_existing, ec);
         if (!ec)
             return true;
-        error = "cannot stage runtime library " + source.string() + ": " + ec.message();
+        error = "cannot stage runtime library " + pathText(source) + ": " + ec.message();
         return false;
     };
 #ifdef _WIN32
@@ -291,7 +292,7 @@ bool buildGame(const fs::path &root,
     {
         if (entry.is_regular_file(ec))
         {
-            const std::string name = entry.path().filename().string();
+            const std::string name = pathText(entry.path().filename());
             if (name.find(".so") != std::string::npos)
             {
                 const fs::path target = buildDir / entry.path().filename();
@@ -307,7 +308,7 @@ bool buildGame(const fs::path &root,
         {
             if (entry.is_regular_file(ec))
             {
-                const std::string name = entry.path().filename().string();
+                const std::string name = pathText(entry.path().filename());
                 if (name.rfind("libc++", 0) == 0 && name.find(".so") != std::string::npos)
                 {
                     if (!copyRuntime(entry.path(), buildDir / entry.path().filename()))

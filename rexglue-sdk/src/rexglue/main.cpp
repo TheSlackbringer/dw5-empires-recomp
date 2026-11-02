@@ -58,6 +58,7 @@ void ConfigureLogging(const std::string& level, const std::string& log_file, boo
 
 int main(int argc, char** argv) {
   CLI::App app{TitleString(), "rexglue"};
+  argv = app.ensure_utf8(argv); // CLI11 uses the native Windows command line; POSIX is unchanged.
   app.set_version_flag("--version", REXGLUE_VERSION_STRING);
   app.require_subcommand(1);
   // Lets cvar overrides be spelled after the subcommand name.

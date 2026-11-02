@@ -1,5 +1,6 @@
 #include "wizard_ui.h"
 #include "install_state.h"
+#include "install_location.h"
 #include "xdvdfs.h"
 
 #include <chrono>
@@ -71,14 +72,24 @@ static void SDLCALL onFileDialogCallback(void *userdata, const char * const *fil
     }
 }
 
+static void SDLCALL onFolderDialog(void *userdata, const char * const *files, int)
+{
+    std::unique_ptr<std::shared_ptr<DialogState>> owner(static_cast<std::shared_ptr<DialogState> *>(userdata));
+    if(files && *files && **files) {
+        std::lock_guard<std::mutex> lock((*owner)->mutex);
+        (*owner)->selectedFile=*files;
+        (*owner)->hasResult=true;
+    }
+}
+
 int runWizardConsole(const SetupOptions &options)
 {
     std::cout << "====================================================\n";
     std::cout << " Dynasty Warriors 5: Empires - Setup Wizard\n";
     std::cout << "====================================================\n";
-    std::cout << "Data directory: " << options.effectiveDataDir().string() << "\n";
+    std::cout << "Data directory: " << pathText(options.effectiveDataDir()) << "\n";
     if (!options.discIso.empty())
-        std::cout << "Disc image:     " << options.discIso.string() << "\n";
+        std::cout << "Disc image:     " << pathText(options.discIso) << "\n";
     std::cout << "----------------------------------------------------\n";
 
     if (options.discIso.empty() &&
@@ -123,29 +134,32 @@ int runWizardConsole(const SetupOptions &options)
             }
             if (status.finished)
             {
-                std::cout << "\nSUCCESS: Game built and ready at " << status.executable.string() << std::endl;
+                std::cout << "\nSUCCESS: Game built and ready at " << pathText(status.executable) << std::endl;
                 return 0;
             }
         }
     }
 }
 
-bool runWizardWindow(const WizardConfig &config)
+bool runWizardWindow(WizardConfig &config)
 {
-    if (config.noWindow)
-    {
-        if (!config.layoutError.empty())
-        {
-            std::cerr << "Setup error: " << config.layoutError << std::endl;
-            return false;
+    InstallFolderSelection destination{config.launcherDir, config.base.effectiveDataDir(),
+                                       config.explicitDestination, false, config.destinationError};
+    const auto console = [&] {
+        if (!config.layoutError.empty()) {
+            std::cerr << "Setup error: " << config.layoutError << std::endl; return false;
+        }
+        if (!destination.prepare()) {
+            std::cerr << "Setup destination error: " << destination.error << std::endl; return false;
         }
         return runWizardConsole(config.base) == 0;
-    }
+    };
+    if (config.noWindow) return console();
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
     {
         std::cerr << "SDL_Init failed (" << SDL_GetError() << "), falling back to console setup." << std::endl;
-        return runWizardConsole(config.base) == 0;
+        return console();
     }
 
     const int kWindowW = 680;
@@ -157,7 +171,7 @@ bool runWizardWindow(const WizardConfig &config)
     {
         std::cerr << "SDL_CreateWindow failed (" << SDL_GetError() << "), falling back to console setup." << std::endl;
         SDL_Quit();
-        return runWizardConsole(config.base) == 0;
+        return console();
     }
 
     SDL_Renderer *renderer = SDL_CreateRenderer(window, nullptr);
@@ -166,13 +180,14 @@ bool runWizardWindow(const WizardConfig &config)
         std::cerr << "SDL_CreateRenderer failed (" << SDL_GetError() << "), falling back to console setup." << std::endl;
         SDL_DestroyWindow(window);
         SDL_Quit();
-        return runWizardConsole(config.base) == 0;
+        return console();
     }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.IniFilename = nullptr; // The wizard has no persistent window layout outside the installation.
     ImGui::StyleColorsDark();
 
     // Dark sleek theme
@@ -191,11 +206,14 @@ bool runWizardWindow(const WizardConfig &config)
     char isoPathBuf[1024] = {0};
     if (!config.prefilledIso.empty())
     {
-        std::string s = config.prefilledIso.string();
+        std::string s = pathText(config.prefilledIso);
         std::snprintf(isoPathBuf, sizeof(isoPathBuf), "%s", s.c_str());
     }
 
     DialogState dialogState;
+    auto folderDialog = std::make_shared<DialogState>();
+    char destinationBuf[32768] = {};
+    std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
     std::unique_ptr<SetupRun> activeRun;
     bool quit = false;
     bool succeeded = false;
@@ -216,7 +234,7 @@ bool runWizardWindow(const WizardConfig &config)
                     activeRun->cancel();
                 quit = true;
             }
-            else if (event.type == SDL_EVENT_DROP_FILE)
+            else if (event.type == SDL_EVENT_DROP_FILE && !activeRun)
             {
                 if (event.drop.data)
                 {
@@ -227,12 +245,22 @@ bool runWizardWindow(const WizardConfig &config)
 
         {
             std::lock_guard<std::mutex> lock(dialogState.mutex);
-            if (dialogState.hasResult)
+            if (dialogState.hasResult && !activeRun)
             {
                 std::snprintf(isoPathBuf, sizeof(isoPathBuf), "%s", dialogState.selectedFile.c_str());
                 dialogState.hasResult = false;
             }
         }
+
+        {
+            std::lock_guard<std::mutex> lock(folderDialog->mutex);
+            if (folderDialog->hasResult) {
+                if (!activeRun && destination.choose(pathFromText(folderDialog->selectedFile)))
+                    std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
+                folderDialog->hasResult=false;
+            }
+        }
+        destination.frozen=bool(activeRun);
 
         ImGui_ImplSDLRenderer3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -253,6 +281,33 @@ bool runWizardWindow(const WizardConfig &config)
             ImGui::Separator();
             ImGui::Spacing();
 
+            if (!config.launcherDir.empty() || config.explicitDestination) {
+                ImGui::TextUnformatted("Installation folder:");
+                ImGui::BeginDisabled(destination.frozen || destination.explicitOverride);
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::InputText("##InstallFolder", destinationBuf, sizeof(destinationBuf))) {
+                    if (*destinationBuf) destination.choose(pathFromText(destinationBuf));
+                    else destination.error="Choose an installation folder before continuing.";
+                }
+                if (ImGui::Button("Use launcher folder")) {
+                    destination.choose(config.launcherDir);
+                    std::snprintf(destinationBuf,sizeof(destinationBuf),"%s",pathText(destination.destination).c_str());
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Choose folder..."))
+                    SDL_ShowOpenFolderDialog(onFolderDialog,new std::shared_ptr<DialogState>(folderDialog),
+                                             window,destinationBuf,false);
+                ImGui::EndDisabled();
+                if(destination.explicitOverride)
+                    ImGui::TextWrapped("This run uses an explicit folder override. The remembered choice is unchanged.");
+                ImGui::TextWrapped("Destination: %s",pathText(destination.destination).c_str());
+                if(!destination.error.empty()) {
+                    ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(0.95f,0.30f,0.30f,1.0f));
+                    ImGui::TextWrapped("%s",destination.error.c_str()); ImGui::PopStyleColor();
+                }
+                ImGui::Separator();
+            }
+
             if (!config.layoutError.empty())
             {
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.30f, 0.30f, 1.0f));
@@ -272,7 +327,7 @@ bool runWizardWindow(const WizardConfig &config)
                     if (!currentIso.empty())
                     {
                         std::error_code ec;
-                        fs::path p(currentIso);
+                        fs::path p = pathFromText(currentIso);
                         if (!fs::exists(p, ec) || !fs::is_regular_file(p, ec))
                         {
                             isoError = "File not found: " + currentIso;
@@ -361,21 +416,26 @@ bool runWizardWindow(const WizardConfig &config)
                     canStart = true;
                 }
                 else if (validatedIsoPath.empty() &&
-                         installState(config.base.effectiveDataDir()) == InstallState::Installed)
+                         installState(destination.destination) == InstallState::Installed)
                 {
                     canStart = true;
                 }
 
+                canStart = canStart && destination.error.empty() && !destination.destination.empty();
                 if (!canStart)
                     ImGui::BeginDisabled();
 
                 if (ImGui::Button("Install & Play", ImVec2(160, 36)))
                 {
-                    SetupOptions opts = config.base;
-                    if (isoValid)
-                        opts.discIso = fs::path(validatedIsoPath);
-                    activeRun = std::make_unique<SetupRun>(opts);
-                    activeRun->start();
+                    if (destination.prepare()) {
+                        if (!config.launcherDir.empty() || config.explicitDestination)
+                            config.base.dataDir = destination.destination;
+                        SetupOptions opts = config.base;
+                        if (isoValid)
+                            opts.discIso = pathFromText(validatedIsoPath);
+                        activeRun = std::make_unique<SetupRun>(opts);
+                        activeRun->start();
+                    }
                 }
 
                 if (!canStart)

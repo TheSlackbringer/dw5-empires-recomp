@@ -9,6 +9,7 @@
  *              See LICENSE file in the project root for full license text.
  */
 
+#include <rex/filesystem.h>
 #include <rex/codegen/output_stamp.h>
 
 #include <fstream>
@@ -33,7 +34,7 @@ std::optional<OutputStamp> OutputStamp::Load(const std::filesystem::path& path) 
 
   nlohmann::json doc = nlohmann::json::parse(in, nullptr, false);
   if (doc.is_discarded() || !doc.is_object()) {
-    REXCODEGEN_WARN("Ignoring malformed codegen stamp: {}", path.string());
+    REXCODEGEN_WARN("Ignoring malformed codegen stamp: {}", rex::path_to_utf8(path));
     return std::nullopt;
   }
 
@@ -87,12 +88,12 @@ std::string ComputeInputFingerprint(std::span<const std::filesystem::path> input
       if (digest.empty()) {
         // Weaker than content, but a constant here would report a locked input
         // as unchanged and skip the module forever.
-        REXCODEGEN_WARN("Could not read {} for fingerprinting", path.string());
+        REXCODEGEN_WARN("Could not read {} for fingerprinting", rex::path_to_utf8(path));
         digest = fmt::format("<unreadable:{}:{}>", std::filesystem::file_size(path, ec),
                              std::filesystem::last_write_time(path, ec).time_since_epoch().count());
       }
     }
-    accumulator += fmt::format("file={} {}\n", path.filename().string(), digest);
+    accumulator += fmt::format("file={} {}\n", rex::path_to_utf8(path.filename()), digest);
   }
 
   return rex::hash_bytes(accumulator);
@@ -101,7 +102,8 @@ std::string ComputeInputFingerprint(std::span<const std::filesystem::path> input
 namespace {
 
 std::string EscapeDepfilePath(const std::filesystem::path& path) {
-  std::string source = std::filesystem::absolute(path).generic_string();
+  const auto utf8 = std::filesystem::absolute(path).generic_u8string();
+  std::string source(utf8.begin(), utf8.end());
   std::string escaped;
   escaped.reserve(source.size() + 8);
   for (char c : source) {

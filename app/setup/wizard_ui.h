@@ -13,6 +13,9 @@ namespace dw5e::setup {
 struct WizardConfig
 {
     SetupOptions base;
+    std::filesystem::path launcherDir;
+    std::string destinationError;
+    bool explicitDestination = false;
     std::string layoutError;
     std::filesystem::path prefilledIso;
     bool discInstalled = false;
@@ -21,7 +24,8 @@ struct WizardConfig
 };
 
 // Runs setup in interactive GUI window (ImGui + SDL3).
-bool runWizardWindow(const WizardConfig &config);
+// Returns the final chosen destination in config.base, including after a GUI selection.
+bool runWizardWindow(WizardConfig &config);
 
 // Runs setup headless on console, printing progress steps to stdout.
 int runWizardConsole(const SetupOptions &options);

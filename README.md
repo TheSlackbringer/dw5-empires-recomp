@@ -37,9 +37,11 @@ Release packages are **builders**: they bundle the setup wizard, compiler tools,
 3. **First launch:** When prompted, select your `dw5e.iso`. The setup wizard verifies your disc, extracts assets, translates Xenon code, and compiles the native executable (~2–4 minutes).
 4. **Subsequent launches:** The game boots instantly (<1 second).
 
-Your game data, saves, settings, and logs are stored in:
-- **Windows:** `%LOCALAPPDATA%\DW5E`
-- **Linux:** `~/.local/share/dw5e` (or `$XDG_DATA_HOME/dw5e`)
+By default, the installation stays **beside `DW5E.exe` or the original AppImage**. Setup shows an editable destination and **Choose folder**; a custom choice is remembered in `dw5e-install.json` beside the launcher. There is no automatic fallback location. The release folder must be writable to remember a choice.
+
+Keep the complete installation together when moving it on the same platform. Update release files in place, preserving `dw5e-install.json`, game files, saves, settings and caches. A required rebuild uses the installed game files without another ISO extraction. Console setup supports `--data-dir <folder>`; precedence is that option, `DW5E_DATA_DIR`, remembered choice, then the launcher folder. Explicit invocation overrides do not replace the remembered choice.
+
+For an older installation, keep the original as a backup and copy its contents into the new destination before starting the new launcher. Old locations were `%LOCALAPPDATA%\DW5E` on Windows and `$XDG_DATA_HOME/dw5e` (normally `~/.local/share/dw5e`) on Linux. Keep new release files on name conflicts; the old generated root manifest is not needed. Select the destination if it is external. Nothing is moved or deleted automatically.
 
 ---
 

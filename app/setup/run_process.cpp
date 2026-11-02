@@ -1,4 +1,5 @@
 #include "run_process.h"
+#include "install_location.h"
 
 #include <chrono>
 #include <fstream>
@@ -147,7 +148,7 @@ ProcessResult runProcess(const std::filesystem::path &program,
                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (log == INVALID_HANDLE_VALUE)
     {
-        result.error = "cannot open log file " + logFile.string() + ": " + windowsError(GetLastError());
+        result.error = "cannot open log file " + pathText(logFile) + ": " + windowsError(GetLastError());
         return result;
     }
     // A GUI launcher may not have valid inherited standard input.
@@ -180,7 +181,7 @@ ProcessResult runProcess(const std::filesystem::path &program,
                         environment.empty() ? nullptr : environment.data(),
                         dir.empty() ? nullptr : dir.c_str(), &si, &pi))
     {
-        result.error = "failed to start " + program.string() + ": " + windowsError(GetLastError());
+        result.error = "failed to start " + pathText(program) + ": " + windowsError(GetLastError());
         if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
         CloseHandle(log);
         CloseHandle(job);
@@ -191,12 +192,12 @@ ProcessResult runProcess(const std::filesystem::path &program,
     const bool assigned = AssignProcessToJobObject(job, pi.hProcess);
     if (!assigned)
     {
-        result.error = "cannot manage subprocess " + program.string() + ": " + windowsError(GetLastError());
+        result.error = "cannot manage subprocess " + pathText(program) + ": " + windowsError(GetLastError());
         TerminateProcess(pi.hProcess, 1);
     }
     else if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1))
     {
-        result.error = "cannot resume subprocess " + program.string() + ": " + windowsError(GetLastError());
+        result.error = "cannot resume subprocess " + pathText(program) + ": " + windowsError(GetLastError());
         TerminateJobObject(job, 1);
     }
     else
@@ -260,7 +261,7 @@ bool launchDetached(const std::filesystem::path &program,
                         CREATE_DEFAULT_ERROR_MODE, nullptr,
                         dir.empty() ? nullptr : dir.c_str(), &si, &pi))
     {
-        error = "cannot launch " + program.string() + ": " + windowsError(GetLastError());
+        error = "cannot launch " + pathText(program) + ": " + windowsError(GetLastError());
         return false;
     }
 
@@ -287,7 +288,7 @@ ProcessResult runProcess(const std::filesystem::path &program,
     int logFd = open(logFile.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (logFd < 0)
     {
-        result.error = "cannot open log file " + logFile.string() + ": " + std::strerror(errno);
+        result.error = "cannot open log file " + pathText(logFile) + ": " + std::strerror(errno);
         return result;
     }
 
@@ -343,7 +344,7 @@ ProcessResult runProcess(const std::filesystem::path &program,
         close(logFd);
 
         std::vector<const char *> argv;
-        std::string progStr = program.string();
+        std::string progStr = pathText(program);
         argv.push_back(progStr.c_str());
         for (const auto &arg : args)
             argv.push_back(arg.c_str());
@@ -363,7 +364,7 @@ ProcessResult runProcess(const std::filesystem::path &program,
     close(launchPipe[0]);
     if (received != 0)
     {
-        result.error = "failed to start " + program.string() + ": " +
+        result.error = "failed to start " + pathText(program) + ": " +
                        std::string(std::strerror(received > 0 ? launchCode : errno));
         if (received < 0)
             kill(pid, SIGKILL);
@@ -440,7 +441,7 @@ bool launchDetached(const std::filesystem::path &program,
         }
 
         std::vector<const char *> argv;
-        std::string progStr = program.string();
+        std::string progStr = pathText(program);
         argv.push_back(progStr.c_str());
         for (const auto &arg : args)
             argv.push_back(arg.c_str());

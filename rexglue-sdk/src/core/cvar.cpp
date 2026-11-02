@@ -20,6 +20,7 @@
 #include <CLI/CLI.hpp>
 
 #include <rex/cvar.h>
+#include <rex/filesystem.h>
 #include <rex/logging.h>
 #include <rex/platform/env.h>
 
@@ -638,16 +639,18 @@ std::vector<std::string> Init(int argc, char** argv) {
 
 void LoadConfig(const std::filesystem::path& config_path) {
   if (!std::filesystem::exists(config_path)) {
-    REXLOG_DEBUG("Config file not found: {}", config_path.string());
+    REXLOG_DEBUG("Config file not found: {}", rex::path_to_utf8(config_path));
     return;
   }
 
   try {
-    auto config = toml::parse_file(config_path.string());
+    std::ifstream stream(config_path, std::ios::binary);
+    if (!stream) { REXLOG_ERROR("Failed to open config {}", rex::path_to_utf8(config_path)); return; }
+    auto config = toml::parse(stream, rex::path_to_utf8(config_path));
     ApplyTomlTable(config, "");
-    REXLOG_DEBUG("Loaded config from {}", config_path.string());
+    REXLOG_DEBUG("Loaded config from {}", rex::path_to_utf8(config_path));
   } catch (const toml::parse_error& err) {
-    REXLOG_ERROR("Failed to parse config {}: {}", config_path.string(), err.what());
+    REXLOG_ERROR("Failed to parse config {}: {}", rex::path_to_utf8(config_path), err.what());
   }
 }
 
@@ -700,12 +703,12 @@ void SaveConfig(const std::filesystem::path& config_path) {
   try {
     std::ofstream file(config_path);
     if (!file) {
-      REXLOG_ERROR("SaveConfig: failed to open {}", config_path.string());
+      REXLOG_ERROR("SaveConfig: failed to open {}", rex::path_to_utf8(config_path));
       return;
     }
     file << "# Auto-generated cvar configuration\n";
     file << content;
-    REXLOG_INFO("Saved config to {}", config_path.string());
+    REXLOG_INFO("Saved config to {}", rex::path_to_utf8(config_path));
   } catch (const std::exception& e) {
     REXLOG_ERROR("SaveConfig: {}", e.what());
   }

@@ -12,6 +12,8 @@
 
 // TOML config file loading
 
+#include <rex/filesystem.h>
+#include <fstream>
 #include <algorithm>
 #include <map>
 #include <set>
@@ -391,17 +393,17 @@ bool LoadRecursive(const std::filesystem::path& filePath, RecompilerConfig& cfg,
                    std::set<std::string>& visited, uint32_t depth) {
   if (depth > kMaxIncludeDepth) {
     REXCODEGEN_ERROR("[config] include depth exceeds maximum ({}) at: {}", kMaxIncludeDepth,
-                     filePath.string());
+                     rex::path_to_utf8(filePath));
     return false;
   }
 
   std::error_code ec;
   auto canonical = std::filesystem::canonical(filePath, ec);
   if (ec) {
-    REXCODEGEN_ERROR("[config] cannot resolve path '{}': {}", filePath.string(), ec.message());
+    REXCODEGEN_ERROR("[config] cannot resolve path '{}': {}", rex::path_to_utf8(filePath), ec.message());
     return false;
   }
-  std::string canonicalStr = canonical.string();
+  std::string canonicalStr = rex::path_to_utf8(canonical);
   if (visited.contains(canonicalStr)) {
     REXCODEGEN_ERROR("[config] circular include detected: {}", canonicalStr);
     return false;
@@ -411,14 +413,16 @@ bool LoadRecursive(const std::filesystem::path& filePath, RecompilerConfig& cfg,
 
   toml::table toml;
   try {
-    toml = toml::parse_file(canonicalStr);
+    std::ifstream input(canonical);
+    if (!input) { REXCODEGEN_ERROR("Cannot open config file {}", canonicalStr); return false; }
+    toml = toml::parse(input, canonicalStr);
   } catch (const toml::parse_error& e) {
     REXCODEGEN_ERROR("Failed to parse config file '{}': {}", canonicalStr, e.what());
     return false;
   }
-  REXCODEGEN_DEBUG("[config] loaded: {}", filePath.filename().string());
+  REXCODEGEN_DEBUG("[config] loaded: {}", rex::path_to_utf8(filePath.filename()));
   return ApplyTableWithIncludes(toml, canonical.parent_path(), cfg, visited, depth,
-                                filePath.filename().string());
+                                rex::path_to_utf8(filePath.filename()));
 }
 
 bool ApplyTableWithIncludes(const toml::table& tbl, const std::filesystem::path& base_dir,
@@ -428,7 +432,7 @@ bool ApplyTableWithIncludes(const toml::table& tbl, const std::filesystem::path&
   if (auto* includesArray = tbl["includes"].as_array()) {
     for (const auto& elem : *includesArray) {
       if (auto includePath = elem.value<std::string>()) {
-        auto resolved = base_dir / *includePath;
+        auto resolved = base_dir / rex::to_path(*includePath);
         if (!std::filesystem::exists(resolved)) {
           REXCODEGEN_ERROR("[config] included file not found: {} (resolved from {})", *includePath,
                            description);
@@ -492,7 +496,7 @@ bool FinalizeConfig(RecompilerConfig& cfg) {
 
 bool RecompilerConfig::Load(const std::string_view& configFilePath) {
   std::set<std::string> visited;
-  std::filesystem::path path(configFilePath);
+  auto path = rex::to_path(configFilePath);
   if (!LoadRecursive(path, *this, visited, 0)) {
     return false;
   }

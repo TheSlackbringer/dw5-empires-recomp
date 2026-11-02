@@ -1,6 +1,7 @@
 #include "setup_pipeline.h"
 #include "codegen.h"
 #include "install_state.h"
+#include "install_location.h"
 #include "xdvdfs.h"
 
 #include <algorithm>
@@ -153,8 +154,12 @@ void SetupRun::run()
     const fs::path logDir = m_options.effectiveLogDir();
 
     std::error_code ec;
-    fs::create_directories(dataDir, ec);
+    std::string destinationError;
+    if (!validateInstallDirectory(dataDir, destinationError)) {
+        fail(destinationError); return;
+    }
     fs::create_directories(logDir, ec);
+    if (ec) { fail("Cannot create setup logs at " + pathText(logDir) + ": " + ec.message()); return; }
 
 #ifndef _WIN32
     if (fs::is_regular_file(m_options.root / "BUILD_ID", ec))

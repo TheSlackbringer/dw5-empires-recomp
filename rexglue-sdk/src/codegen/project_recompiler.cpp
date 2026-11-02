@@ -9,6 +9,7 @@
  *              See LICENSE file in the project root for full license text.
  */
 
+#include <rex/filesystem.h>
 #include <rex/codegen/project_recompiler.h>
 
 #include <algorithm>
@@ -47,8 +48,8 @@ namespace rex::codegen {
 namespace {
 
 std::string DeriveTargetNameFromFilePath(const std::string& file_path) {
-  std::filesystem::path p(file_path);
-  std::string name = p.stem().string();
+  auto p = rex::to_path(file_path);
+  std::string name = rex::path_to_utf8(p.stem());
   std::replace(name.begin(), name.end(), '.', '_');
   std::replace(name.begin(), name.end(), ' ', '_');
   return name;
@@ -60,14 +61,14 @@ std::vector<std::filesystem::path> CollectModuleInputs(const RecompilerConfig& c
   namespace fs = std::filesystem;
 
   std::vector<fs::path> inputs;
-  inputs.push_back(configDir / cfg.filePath);
+  inputs.push_back(configDir / rex::to_path(cfg.filePath));
   inputs.push_back(manifestPath);
   for (const auto& loaded : cfg.loadedFiles) {
-    inputs.emplace_back(loaded);
+    inputs.push_back(rex::to_path(loaded));
   }
   if (!cfg.templateDir.empty()) {
     std::error_code ec;
-    for (const auto& entry : fs::recursive_directory_iterator(configDir / cfg.templateDir, ec)) {
+    for (const auto& entry : fs::recursive_directory_iterator(configDir / rex::to_path(cfg.templateDir), ec)) {
       if (entry.is_regular_file())
         inputs.push_back(entry.path());
     }
@@ -209,10 +210,10 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
 
   const auto& entryConfig = targeted[0].config;
   auto configDir = manifest_.manifestDir;
-  fs::path entryXexPath = configDir / entryConfig.filePath;
+  fs::path entryXexPath = configDir / rex::to_path(entryConfig.filePath);
   if (!fs::exists(entryXexPath)) {
     return Err<void>(ErrorCategory::IO,
-                     fmt::format("Entrypoint XEX not found: {}", entryXexPath.string()));
+                     fmt::format("Entrypoint XEX not found: {}", rex::path_to_utf8(entryXexPath)));
   }
   entryXexPath = fs::canonical(entryXexPath);
 
@@ -220,11 +221,11 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
   // manifest override if set; otherwise default to the entrypoint's parent.
   fs::path gameRoot;
   if (manifest_.gameRoot && !manifest_.gameRoot->empty()) {
-    fs::path resolved = configDir / *manifest_.gameRoot;
+    fs::path resolved = configDir / rex::to_path(*manifest_.gameRoot);
     if (!fs::exists(resolved) || !fs::is_directory(resolved)) {
       return Err<void>(ErrorCategory::Validation,
                        fmt::format("[project].game_root '{}' does not resolve to a directory",
-                                   resolved.string()));
+                                   rex::path_to_utf8(resolved)));
     }
     gameRoot = fs::canonical(resolved);
   } else {
@@ -235,10 +236,10 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
   if (entryRel.empty() || *entryRel.begin() == "..") {
     return Err<void>(ErrorCategory::Validation,
                      fmt::format("Entrypoint XEX '{}' resolves outside game root '{}'",
-                                 entryXexPath.string(), gameRoot.string()));
+                                 rex::path_to_utf8(entryXexPath), rex::path_to_utf8(gameRoot)));
   }
 
-  auto runtime = std::make_unique<Runtime>(gameRoot.string());
+  auto runtime = std::make_unique<Runtime>(gameRoot);
   auto rtStatus = runtime->Setup(rex::RuntimeConfig{
       .kernel_init = rex::kernel::InitializeKernel,
       .tool_mode = true,
@@ -248,7 +249,7 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
                      fmt::format("Failed to initialize Runtime: {:#x}", rtStatus));
   }
 
-  std::string entryRelStr = entryRel.string();
+  std::string entryRelStr = rex::path_to_utf8(entryRel);
   std::replace(entryRelStr.begin(), entryRelStr.end(), '/', '\\');
   auto entryVfsPath = "game:\\" + entryRelStr;
   rtStatus = runtime->LoadXexImage(entryVfsPath);
@@ -257,17 +258,17 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
                      fmt::format("Failed to load entrypoint XEX: {:#x}", rtStatus));
   }
 
-  auto entry_display_name = std::filesystem::path(targeted[0].config.filePath).filename().string();
+  auto entry_display_name = rex::path_to_utf8(rex::to_path(targeted[0].config.filePath).filename());
   ReportBinaryInfo(opts.reporter, entry_display_name,
                    *runtime->kernel_state()->GetExecutableModule()->xex_module());
 
   std::vector<rex::system::object_ref<rex::system::UserModule>> dllModules;
   for (size_t i = 1; i < targeted.size(); ++i) {
     const auto& dllConfig = targeted[i].config;
-    fs::path dllXexPath = configDir / dllConfig.filePath;
+    fs::path dllXexPath = configDir / rex::to_path(dllConfig.filePath);
     if (!fs::exists(dllXexPath)) {
       return Err<void>(ErrorCategory::IO,
-                       fmt::format("DLL XEX not found: {}", dllXexPath.string()));
+                       fmt::format("DLL XEX not found: {}", rex::path_to_utf8(dllXexPath)));
     }
     dllXexPath = fs::canonical(dllXexPath);
 
@@ -275,9 +276,9 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
     if (relPath.empty() || *relPath.begin() == "..") {
       return Err<void>(ErrorCategory::Validation,
                        fmt::format("DLL '{}' resolves outside game root '{}': {}",
-                                   targeted[i].targetName, gameRoot.string(), dllXexPath.string()));
+                                   targeted[i].targetName, rex::path_to_utf8(gameRoot), rex::path_to_utf8(dllXexPath)));
     }
-    std::string relStr = relPath.string();
+    std::string relStr = rex::path_to_utf8(relPath);
     std::replace(relStr.begin(), relStr.end(), '/', '\\');
     auto dllVfsPath = "game:\\" + relStr;
     auto userMod = runtime->kernel_state()->LoadUserModule(dllVfsPath, false);
@@ -287,7 +288,7 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
     }
     REXCODEGEN_TRACE("Loaded DLL module '{}' at base 0x{:08X}", targeted[i].targetName,
                      userMod->xex_module()->base_address());
-    auto dll_display_name = std::filesystem::path(targeted[i].config.filePath).filename().string();
+    auto dll_display_name = rex::path_to_utf8(rex::to_path(targeted[i].config.filePath).filename());
     ReportBinaryInfo(opts.reporter, dll_display_name, *userMod->xex_module());
     dllModules.push_back(std::move(userMod));
   }
@@ -300,7 +301,7 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
   std::vector<ContextEntry> contexts;
 
   auto make_display_name = [](const std::string& filePath) {
-    return std::filesystem::path(filePath).filename().string();
+    return rex::path_to_utf8(rex::to_path(filePath).filename());
   };
 
   auto* resolver = runtime->export_resolver();
@@ -357,7 +358,7 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
 
   for (size_t i = 0; i < contexts.size(); ++i) {
     auto& entry = contexts[i];
-    auto outDir = entry.ctx.configDir() / entry.ctx.Config().outDirectoryPath;
+    auto outDir = entry.ctx.configDir() / rex::to_path(entry.ctx.Config().outDirectoryPath);
     auto inputs =
         CollectModuleInputs(entry.ctx.Config(), entry.ctx.configDir(), manifest_.manifestPath);
     fingerprints[i] = FingerprintModule(entry.ctx.Config(), inputs, opts.sdkVersion);
@@ -440,7 +441,7 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
                          writer.unchangedFiles().end());
     std::sort(stamp.outputs.begin(), stamp.outputs.end());
 
-    auto outDir = entry.ctx.configDir() / entry.ctx.Config().outDirectoryPath;
+    auto outDir = entry.ctx.configDir() / rex::to_path(entry.ctx.Config().outDirectoryPath);
     if (WriteIfChanged(outDir / kStampFileName, stamp.Serialize()) == WriteOutcome::Failed) {
       return Err<void>(ErrorCategory::IO,
                        fmt::format("Failed to write stamp for '{}'", entry.module->targetName));
@@ -454,18 +455,18 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
   }
 
   if (!contexts.empty()) {
-    auto buildDir = contexts[0].ctx.configDir() / contexts[0].ctx.Config().outDirectoryPath;
+    auto buildDir = contexts[0].ctx.configDir() / rex::to_path(contexts[0].ctx.Config().outDirectoryPath);
     std::sort(allInputs.begin(), allInputs.end());
     allInputs.erase(std::unique(allInputs.begin(), allInputs.end()), allInputs.end());
 
     auto buildStamp = fs::absolute(buildDir / kBuildStampFileName);
     if (!WriteDepfile(buildDir / kDepfileName, buildStamp, allInputs)) {
       return Err<void>(ErrorCategory::IO,
-                       fmt::format("Failed to write {}", (buildDir / kDepfileName).string()));
+                       fmt::format("Failed to write {}", rex::path_to_utf8((buildDir / kDepfileName))));
     }
     // Never WriteIfChanged: the build rule re-runs until this mtime passes its inputs.
     if (!WriteFileBytes(buildStamp, fmt::format("{}\n", fmt::join(fingerprints, "\n")))) {
-      return Err<void>(ErrorCategory::IO, fmt::format("Failed to write {}", buildStamp.string()));
+      return Err<void>(ErrorCategory::IO, fmt::format("Failed to write {}", rex::path_to_utf8(buildStamp)));
     }
   }
 
@@ -474,12 +475,12 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
     return Ok();
   }
 
-  auto outputPath = contexts[0].ctx.configDir() / contexts[0].ctx.Config().outDirectoryPath;
+  auto outputPath = contexts[0].ctx.configDir() / rex::to_path(contexts[0].ctx.Config().outDirectoryPath);
   std::error_code mk_ec;
   fs::create_directories(outputPath, mk_ec);
   if (mk_ec) {
     return Err<void>(ErrorCategory::IO, fmt::format("Failed to create output dir {}: {}",
-                                                    outputPath.string(), mk_ec.message()));
+                                                    rex::path_to_utf8(outputPath), mk_ec.message()));
   }
 
   if (opts.reporter)
@@ -508,15 +509,15 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
     switch (WriteIfChanged(registryPath, registryContent)) {
       case WriteOutcome::Failed:
         return Err<void>(ErrorCategory::IO,
-                         fmt::format("Failed while writing {}", registryPath.string()));
+                         fmt::format("Failed while writing {}", rex::path_to_utf8(registryPath)));
       case WriteOutcome::Unchanged:
-        unchangedFiles_.push_back(registryPath.filename().string());
+        unchangedFiles_.push_back(rex::path_to_utf8(registryPath.filename()));
         break;
       case WriteOutcome::Written:
-        writtenFiles_.push_back(registryPath.filename().string());
+        writtenFiles_.push_back(rex::path_to_utf8(registryPath.filename()));
         break;
     }
-    REXCODEGEN_TRACE("Wrote {}", registryPath.string());
+    REXCODEGEN_TRACE("Wrote {}", rex::path_to_utf8(registryPath));
   }
   if (opts.reporter)
     opts.reporter->projectPhaseFinished();
@@ -545,15 +546,15 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
     switch (WriteIfChanged(dllCmakePath, dllCmakeContent)) {
       case WriteOutcome::Failed:
         return Err<void>(ErrorCategory::IO,
-                         fmt::format("Failed while writing {}", dllCmakePath.string()));
+                         fmt::format("Failed while writing {}", rex::path_to_utf8(dllCmakePath)));
       case WriteOutcome::Unchanged:
-        unchangedFiles_.push_back(dllCmakePath.filename().string());
+        unchangedFiles_.push_back(rex::path_to_utf8(dllCmakePath.filename()));
         break;
       case WriteOutcome::Written:
-        writtenFiles_.push_back(dllCmakePath.filename().string());
+        writtenFiles_.push_back(rex::path_to_utf8(dllCmakePath.filename()));
         break;
     }
-    REXCODEGEN_TRACE("Wrote {}", dllCmakePath.string());
+    REXCODEGEN_TRACE("Wrote {}", rex::path_to_utf8(dllCmakePath));
   }
   if (opts.reporter)
     opts.reporter->projectPhaseFinished();

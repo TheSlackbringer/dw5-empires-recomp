@@ -249,6 +249,11 @@ if(REXGLUE_BUILD_TESTS)
 endif()
 
 # Third-party dependencies (vendored sources only)
+# Host paths are UTF-8 in the SDK; Windows file sinks must use native wide filenames.
+# Keep this public dependency setting consistent across SDK consumers and exported targets.
+if(WIN32)
+    set(SPDLOG_WCHAR_FILENAMES ON CACHE BOOL "Native Windows log filenames" FORCE)
+endif()
 add_subdirectory(thirdparty)
 
 # Enable warnings after thirdparty

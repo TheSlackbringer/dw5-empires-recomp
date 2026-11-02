@@ -54,6 +54,7 @@ if(DW5E_BUILD_SETUP)
     set(DW5E_SETUP_SOURCES
         setup/xdvdfs.cpp
         setup/install_state.cpp
+        setup/install_location.cpp
         setup/run_process.cpp
         setup/setup_layout.cpp
         setup/codegen.cpp
@@ -123,6 +124,7 @@ add_executable(dw5e_setup_test
     tests/setup_test.cpp
     setup/xdvdfs.cpp
     setup/install_state.cpp
+    setup/install_location.cpp
     setup/setup_layout.cpp
     setup/build_game.cpp
     setup/run_process.cpp
@@ -140,7 +142,8 @@ add_test(NAME setup_unit_tests COMMAND dw5e_setup_test)
 # Standalone lifecycle/recovery fixtures; no game data or visible windows.
 add_executable(dw5e_setup_reliability_test
     tests/setup_reliability_test.cpp
-    setup/xdvdfs.cpp setup/install_state.cpp setup/setup_layout.cpp
+    setup/xdvdfs.cpp setup/install_state.cpp
+    setup/install_location.cpp setup/setup_layout.cpp
     setup/build_game.cpp setup/run_process.cpp setup/codegen.cpp setup/setup_pipeline.cpp
 )
 target_include_directories(dw5e_setup_reliability_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -220,3 +223,56 @@ if(UNIX AND NOT APPLE AND REXGLUE_USE_VULKAN)
         ${CMAKE_CURRENT_SOURCE_DIR}/../rexglue-sdk/thirdparty/renderdoc)
     rexglue_apply_target_settings(dw5e_vulkan_startup_test)
 endif()
+
+# Portable resolver and wizard selection fixtures require no game/disc inputs.
+add_executable(dw5e_install_location_test tests/install_location_test.cpp
+    setup/install_state.cpp setup/install_location.cpp setup/setup_layout.cpp)
+target_include_directories(dw5e_install_location_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME install_location_tests COMMAND dw5e_install_location_test)
+if(WIN32)
+    foreach(target dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_install_location_test)
+        if(TARGET ${target})
+            target_link_libraries(${target} PRIVATE shell32)
+        endif()
+    endforeach()
+endif()
+
+add_executable(dw5e_install_folder_test tests/install_folder_test.cpp
+    setup/install_state.cpp setup/install_location.cpp)
+target_include_directories(dw5e_install_folder_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME install_folder_default_tests COMMAND dw5e_install_folder_test $<TARGET_FILE_DIR:dw5e_install_folder_test>)
+set_tests_properties(install_folder_default_tests PROPERTIES ENVIRONMENT "DW5E_DATA_DIR=;APPIMAGE=")
+add_executable(dw5e_install_fake_game tests/install_fake_game.cpp setup/install_location.cpp)
+if(WIN32)
+    # Match the real GUI game: a console fixture creates a separate console lifetime/working-folder owner.
+    set_target_properties(dw5e_install_fake_game PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+target_include_directories(dw5e_install_fake_game PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(dw5e_launcher_selection_driver
+    tests/wizard_destination_fixture.cpp setup/wizard_main.cpp
+    setup/xdvdfs.cpp setup/install_state.cpp setup/install_location.cpp setup/setup_layout.cpp
+    setup/build_game.cpp setup/run_process.cpp setup/codegen.cpp setup/setup_pipeline.cpp)
+target_include_directories(dw5e_launcher_selection_driver PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/setup)
+target_link_libraries(dw5e_launcher_selection_driver PRIVATE Threads::Threads)
+if(WIN32)
+    set_target_properties(dw5e_launcher_selection_driver PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+if(WIN32)
+    foreach(target dw5e_install_folder_test dw5e_install_fake_game dw5e_launcher_selection_driver)
+        target_link_libraries(${target} PRIVATE shell32)
+    endforeach()
+endif()
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND AND TARGET dw5e_setup AND CMAKE_HOST_SYSTEM_NAME STREQUAL CMAKE_SYSTEM_NAME)
+    add_test(NAME install_launcher_integration_tests COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/launcher_install_test.py
+        --launcher $<TARGET_FILE:dw5e_setup> --game $<TARGET_FILE:dw5e_install_fake_game>
+        --selection-driver $<TARGET_FILE:dw5e_launcher_selection_driver>
+        --out ${CMAKE_CURRENT_BINARY_DIR}/install-launcher-test)
+endif()
+
+# Host filesystem/config/logging only; no window, devices or guest code.
+add_executable(dw5e_host_unicode_test tests/host_unicode_test.cpp)
+target_link_libraries(dw5e_host_unicode_test PRIVATE rex::runtime)
+rexglue_apply_target_settings(dw5e_host_unicode_test)
+add_test(NAME host_unicode_paths_tests COMMAND dw5e_host_unicode_test)

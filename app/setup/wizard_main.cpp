@@ -1,5 +1,6 @@
 #include "codegen.h"
 #include "install_state.h"
+#include "install_location.h"
 #include "run_process.h"
 #include "setup_layout.h"
 #include "wizard_ui.h"
@@ -23,6 +24,10 @@ struct Args
 {
     fs::path iso;
     fs::path root;
+    fs::path dataDir;
+    std::string error;
+    bool help = false;
+    bool audioMute = false;
     bool noWindow = false;
     bool installOnly = false;
     bool rebuild = false;
@@ -38,26 +43,25 @@ std::string firstLine(const fs::path &path)
     return line;
 }
 
-Args parseArgs(int argc, char **argv)
+Args parseArgs(const std::vector<std::string> &argv)
 {
     Args a;
-    for (int i = 1; i < argc; ++i)
-    {
-        const std::string arg = argv[i];
-        const bool hasValue = (i + 1 < argc);
-        if ((arg == "--iso" || arg == "--disc") && hasValue)
-            a.iso = argv[++i];
-        else if (arg == "--root" && hasValue)
-            a.root = argv[++i];
-        else if (arg == "--no-window")
-            a.noWindow = true;
-        else if (arg == "--install")
-        {
-            a.installOnly = true;
-            a.noWindow = true;
-        }
-        else if (arg == "--rebuild")
-            a.rebuild = true;
+    for (size_t i=1;i<argv.size();++i) {
+        const auto &arg=argv[i];
+        if(arg=="--iso" || arg=="--disc" || arg=="--root" || arg=="--data-dir") {
+            if(i+1==argv.size() || argv[i+1].empty() || argv[i+1].starts_with("--")) {
+                a.error="Missing path after "+arg; break;
+            }
+            const auto path=pathFromText(argv[++i]);
+            if(arg=="--root") a.root=path;
+            else if(arg=="--data-dir") a.dataDir=path;
+            else a.iso=path;
+        } else if(arg=="--no-window") a.noWindow=true;
+        else if(arg=="--install") { a.installOnly=true; a.noWindow=true; }
+        else if(arg=="--rebuild") a.rebuild=true;
+        else if(arg=="--audio_mute=true") a.audioMute=true;
+        else if(arg=="--help" || arg=="-h") a.help=true;
+        else { a.error="Unknown setup argument: "+arg; break; }
     }
     return a;
 }
@@ -65,13 +69,21 @@ Args parseArgs(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-    const Args args = parseArgs(argc, argv);
+    const Args args = parseArgs(nativeArguments(argc, argv));
+    if (args.help) {
+        std::cout << "DW5E setup: [--iso <disc>] [--data-dir <folder>] [--install | --no-window] [--rebuild]\n"
+                     "Installation defaults beside DW5E.exe / the original AppImage. The wizard can remember another folder.\n"
+                     "Overrides: --data-dir, DW5E_DATA_DIR, remembered choice, launcher folder. Invocation overrides are not saved.\n";
+        return 0;
+    }
+    if (!args.error.empty()) { std::cerr << args.error << std::endl; return 1; }
 
     std::error_code ec;
     fs::path root = args.root;
     if (root.empty())
     {
-        fs::path exeDir = (argc > 0) ? fs::absolute(argv[0], ec).parent_path() : fs::current_path(ec);
+        std::string discoveryError;
+        fs::path exeDir = executableDirectory(discoveryError);
         root = findRoot(exeDir);
     }
     if (root.empty())
@@ -89,16 +101,22 @@ int main(int argc, char **argv)
 
     // Release package check
     const std::string release = root.empty() ? std::string() : firstLine(root / "BUILD_ID");
-    fs::path game, stamp, data;
+    fs::path game, data, launcher;
+    bool explicitDestination = false;
+    std::string destinationError;
 
     if (!release.empty())
     {
-        data = playerDataDir();
-        if (data.empty())
-            layoutError = "no player data directory found (LOCALAPPDATA or HOME not set)";
+        launcher = launcherDirectory(destinationError);
+        std::string resolveError;
+        if (!resolveInstallLocation(launcher, args.dataDir, data, explicitDestination, resolveError))
+            destinationError = resolveError;
+        else if (!validateInstallDirectory(data, resolveError))
+            destinationError = resolveError;
+        else
+            destinationError.clear();
         options.dataDir = data;
         game = options.effectiveBuildDir() / (kWindows ? "dw5e.exe" : "dw5e");
-        stamp = options.effectiveBuildDir() / "built-from.txt";
     }
 
     const auto installed = [&] {
@@ -106,21 +124,26 @@ int main(int argc, char **argv)
     };
 
     const auto startGame = [&] {
+        if (!validateInstallDirectory(data, destinationError)) {
+            std::cerr << "DW5E launcher error: " << destinationError << std::endl; return 1;
+        }
+        game = options.effectiveBuildDir() / (kWindows ? "dw5e.exe" : "dw5e");
         const fs::path gameData = data / "game" / "files";
         std::vector<std::string> gameArgs = {
-            "--game_data_root=" + gameData.string(),
-            "--user_data_root=" + data.string(),
-            "--cache_root=" + (data / "cache").string(),
+            "--game_data_root=" + pathText(gameData),
+            "--user_data_root=" + pathText(data),
+            "--cache_root=" + pathText(data / "cache"),
             "--gpu_plugin=xenos"
         };
+        if (args.audioMute) gameArgs.push_back("--audio_mute=true");
         std::vector<std::pair<std::string, std::string>> env;
 #ifndef _WIN32
         // Ensure the build directory and local runtime libraries take priority in LD_LIBRARY_PATH
-        std::string ldPath = options.effectiveBuildDir().string() + ":" +
-                             (options.effectiveBuildDir() / "rexglue-sdk" / "src" / "system").string() + ":" +
-                             (options.effectiveBuildDir() / "rexglue-sdk" / "thirdparty").string();
+        std::string ldPath = pathText(options.effectiveBuildDir()) + ":" +
+                             pathText(options.effectiveBuildDir() / "rexglue-sdk" / "src" / "system") + ":" +
+                             pathText(options.effectiveBuildDir() / "rexglue-sdk" / "thirdparty");
         if (fs::exists(options.root / "tools" / "clang" / "lib"))
-            ldPath += ":" + (options.root / "tools" / "clang" / "lib").string();
+            ldPath += ":" + pathText(options.root / "tools" / "clang" / "lib");
         if (const char *orig = std::getenv("LD_LIBRARY_PATH"))
         {
             if (*orig)
@@ -146,17 +169,18 @@ int main(int argc, char **argv)
     };
 
     const auto markBuilt = [&] {
-        std::ofstream out(stamp, std::ios::trunc);
+        std::ofstream out(options.effectiveBuildDir() / "built-from.txt", std::ios::trunc);
         out << release << "\n";
+        return bool(out.flush());
     };
 
     // Fast-path: if game is already built for this release and disc is installed, boot immediately!
-    if (!release.empty() && layoutError.empty() && !args.rebuild && !args.installOnly &&
-        fs::exists(game) && firstLine(stamp) == release && installed())
+    if (!release.empty() && layoutError.empty() && destinationError.empty() && !args.rebuild && !args.installOnly &&
+        fs::exists(game) && firstLine(options.effectiveBuildDir() / "built-from.txt") == release && installed())
     {
         if (args.noWindow)
         {
-            std::cout << "SUCCESS: Game already built and ready at " << game << std::endl;
+            std::cout << "SUCCESS: Game already built and ready at " << pathText(game) << std::endl;
             return 0;
         }
         return startGame();
@@ -177,6 +201,9 @@ int main(int argc, char **argv)
 
     WizardConfig config;
     config.base = options;
+    config.launcherDir = launcher;
+    config.destinationError = destinationError;
+    config.explicitDestination = explicitDestination;
     config.layoutError = layoutError;
     config.prefilledIso = args.iso;
     config.discInstalled = installed();
@@ -186,8 +213,12 @@ int main(int argc, char **argv)
     bool ok = runWizardWindow(config);
     if (ok)
     {
-        if (!release.empty())
-            markBuilt();
+        options = config.base;
+        data = options.effectiveDataDir();
+        if (!release.empty() && !markBuilt()) {
+            std::cerr << "Cannot finish build marker at " << pathText(options.effectiveBuildDir()) << std::endl;
+            return 1;
+        }
 
         if (!args.noWindow)
         {

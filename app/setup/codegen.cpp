@@ -1,4 +1,5 @@
 #include "codegen.h"
+#include "install_location.h"
 #include "run_process.h"
 
 #include <chrono>
@@ -12,8 +13,15 @@ namespace fs = std::filesystem;
 namespace {
 std::string toTomlPath(const fs::path &p)
 {
-    std::string s = p.generic_string();
-    return s;
+    std::string text;
+    for(char c:pathText(p)) {
+        if(c=='\\' || c=='"') { text+='\\'; text+=c; }
+        else if(c=='\n') text+="\\n";
+        else if(c=='\r') text+="\\r";
+        else if(c=='\t') text+="\\t";
+        else text+=c;
+    }
+    return text;
 }
 } // namespace
 
@@ -37,7 +45,7 @@ bool generateCode(const fs::path &root,
     fs::path xex = gameFiles / "default.xex";
     if (!fs::exists(xex, ec))
     {
-        error = "extracted game file default.xex not found in " + gameFiles.string();
+        error = "extracted game file default.xex not found in " + pathText(gameFiles);
         return false;
     }
 
@@ -46,11 +54,12 @@ bool generateCode(const fs::path &root,
     if (!fs::exists(configDir, ec))
         configDir = root / "config";
 
-    fs::path manifestPath = effectiveData / "dw5e_manifest.toml";
+    // Keep the generated invocation manifest separate from packaged source files when data == package.
+    fs::path manifestPath = effectiveData / "generated" / "dw5e_manifest.toml";
     std::ofstream mf(manifestPath, std::ios::trunc);
     if (!mf)
     {
-        error = "cannot create generated manifest " + manifestPath.string();
+        error = "cannot create generated manifest " + pathText(manifestPath);
         return false;
     }
 
@@ -77,7 +86,7 @@ bool generateCode(const fs::path &root,
     if (progress)
         progress(0.1, "Starting ReXGlue recompiler...");
 
-    std::vector<std::string> args = {"codegen", manifestPath.string()};
+    std::vector<std::string> args = {"codegen", pathText(manifestPath)};
     ProcessResult res;
     std::vector<std::pair<std::string, std::string>> env;
 #ifndef _WIN32
@@ -88,7 +97,7 @@ bool generateCode(const fs::path &root,
         {
             if (!ldLibPath.empty())
                 ldLibPath += ":";
-            ldLibPath += p.string();
+            ldLibPath += pathText(p);
         }
     }
     if (const char *curr = std::getenv("LD_LIBRARY_PATH"))
@@ -139,18 +148,18 @@ bool generateCode(const fs::path &root,
     if (!res.started || !res.error.empty())
     {
         error = res.error.empty() ? "failed to start ReXGlue recompiler" : res.error;
-        error += "; check " + logFile.string();
+        error += "; check " + pathText(logFile);
         return false;
     }
     if (res.exitCode != 0)
     {
-        error = "ReXGlue codegen failed (exit code " + std::to_string(res.exitCode) + "); check " + logFile.string();
+        error = "ReXGlue codegen failed (exit code " + std::to_string(res.exitCode) + "); check " + pathText(logFile);
         return false;
     }
 
     if (!fs::exists(outDir / "sources.cmake", ec) && !fs::exists(outDir / "dw5e_pch.h", ec))
     {
-        error = "codegen completed but generated files are missing in " + outDir.string();
+        error = "codegen completed but generated files are missing in " + pathText(outDir);
         return false;
     }
 

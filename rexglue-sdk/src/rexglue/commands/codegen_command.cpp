@@ -6,6 +6,7 @@
  * @license     BSD 3-Clause License
  */
 
+#include <rex/filesystem.h>
 #include "codegen_command.h"
 #include "../ui/progress.h"
 #include "../ui/ui.h"
@@ -40,7 +41,7 @@ void EmitManualReview(std::span<const SourceWarning> warnings, std::string_view 
   rows.reserve(warnings.size());
   for (const auto& w : warnings) {
     rows.push_back(
-        {fmt::format("{}:{}", w.file.generic_string(), w.line_number), w.detail, w.hint});
+        {fmt::format("{}:{}", rex::path_to_utf8(w.file), w.line_number), w.detail, w.hint});
   }
   ui::ManualReviewList(std::string(header), rows);
 }
@@ -113,7 +114,7 @@ rex::Result<ManifestSummary> LoadManifestSummary(const fs::path& manifest_path) 
 
 void EmitProjectHeader(const fs::path& manifest_path, const ManifestSummary& summary) {
   std::vector<ui::KeyValueRow> rows;
-  rows.push_back({"Manifest", manifest_path.generic_string()});
+  rows.push_back({"Manifest", rex::path_to_utf8(manifest_path)});
   if (!summary.project_name.empty()) {
     rows.push_back({"Project", summary.project_name});
   }
@@ -155,7 +156,7 @@ Result<std::string> DiscoverManifestInCwd() {
       continue;
     if (entry.path().extension() != ".toml")
       continue;
-    auto stem = entry.path().stem().string();
+    auto stem = rex::path_to_utf8(entry.path().stem());
     if (stem.size() >= 9 && std::string_view{stem}.substr(stem.size() - 9) == "_manifest") {
       manifests.push_back(entry.path());
     } else {
@@ -164,28 +165,28 @@ Result<std::string> DiscoverManifestInCwd() {
   }
 
   if (manifests.size() == 1)
-    return rex::Ok(manifests.front().string());
+    return rex::Ok(rex::path_to_utf8(manifests.front()));
   if (manifests.size() > 1) {
     return Err<std::string>(
         rex::ErrorCategory::Config,
-        fmt::format("Multiple *_manifest.toml files in {}; pass one explicitly", cwd.string()));
+        fmt::format("Multiple *_manifest.toml files in {}; pass one explicitly", rex::path_to_utf8(cwd)));
   }
   if (other_tomls.size() == 1)
-    return rex::Ok(other_tomls.front().string());
+    return rex::Ok(rex::path_to_utf8(other_tomls.front()));
   if (other_tomls.size() > 1) {
     return Err<std::string>(
         rex::ErrorCategory::Config,
-        fmt::format("Multiple .toml files in {}; pass the manifest explicitly", cwd.string()));
+        fmt::format("Multiple .toml files in {}; pass the manifest explicitly", rex::path_to_utf8(cwd)));
   }
   return Err<std::string>(rex::ErrorCategory::Config,
-                          fmt::format("No manifest .toml found in {}", cwd.string()));
+                          fmt::format("No manifest .toml found in {}", rex::path_to_utf8(cwd)));
 }
 
 Result<void> CodegenFromConfig(const std::string& config_path, const CliContext& ctx,
                                const std::vector<std::string>& targets, bool ignore_stamp) {
   REXLOG_TRACE("Generating code with config: {}", config_path);
 
-  fs::path manifest_path = config_path;
+  fs::path manifest_path = rex::to_path(config_path);
   if (!rex::codegen::ManifestConfig::IsManifest(manifest_path)) {
     return Err<void>(
         rex::ErrorCategory::Config,

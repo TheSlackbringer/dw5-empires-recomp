@@ -1,3 +1,4 @@
+#include "install_location.h"
 #include "setup_layout.h"
 
 #include <fstream>
@@ -38,12 +39,12 @@ bool sameContents(const fs::path &a, const fs::path &b, std::error_code &ec)
 }
 } // namespace
 
-bool syncDirectory(const fs::path &source, const fs::path &target, std::string &error, bool keepSource)
+bool syncDirectory(const fs::path &source, const fs::path &target, std::string &error, bool keepSource, const fs::path &excluded)
 {
     error.clear();
     std::error_code ec;
     const auto fail = [&](const std::string &operation, const fs::path &path) {
-        error = operation + " " + path.string() + ": " + ec.message();
+        error = operation + " " + pathText(path) + ": " + ec.message();
         return false;
     };
     const bool sourceExists = fs::exists(source, ec);
@@ -62,9 +63,22 @@ bool syncDirectory(const fs::path &source, const fs::path &target, std::string &
 
     fs::recursive_directory_iterator it(source, fs::directory_options::none, ec), end;
     if (ec) return fail("cannot read directory", source);
+    const auto targetAbsolute = fs::weakly_canonical(target, ec);
+    if (ec) return fail("cannot resolve destination", target);
+    const auto excludedAbsolute = excluded.empty() ? fs::path{} : fs::weakly_canonical(excluded, ec);
+    if (ec) return fail("cannot resolve excluded installation directory", excluded);
     while (it != end)
     {
         const auto entry = *it;
+        // A custom install can be inside the package tree. Never iterate the output we are creating.
+        const auto sourceAbsolute = fs::weakly_canonical(entry.path(), ec);
+        if (ec) return fail("cannot resolve source", entry.path());
+        if (sourceAbsolute == targetAbsolute || (!excludedAbsolute.empty() && sourceAbsolute == excludedAbsolute)) {
+            it.disable_recursion_pending();
+            it.increment(ec);
+            if (ec) return fail("cannot read directory", source);
+            continue;
+        }
         const fs::path dest = target / entry.path().lexically_relative(source);
         const auto sourceStatus = entry.symlink_status(ec);
         if (ec) return fail("cannot inspect source", entry.path());
@@ -93,7 +107,7 @@ bool syncDirectory(const fs::path &source, const fs::path &target, std::string &
         {
             if (fs::is_symlink(fs::symlink_status(dest, ec)))
             {
-                error = "destination directory is a symlink: " + dest.string();
+                error = "destination directory is a symlink: " + pathText(dest);
                 return false;
             }
             if (ec == std::errc::no_such_file_or_directory) ec.clear();
@@ -143,7 +157,7 @@ bool prepareLinuxBuildRoot(const fs::path &root, const fs::path &data, fs::path 
     fs::create_directories(buildRoot, ec);
     if (ec)
     {
-        error = "cannot create builder directory " + buildRoot.string() + ": " + ec.message();
+        error = "cannot create builder directory " + pathText(buildRoot) + ": " + ec.message();
         return false;
     }
     for (const char *item : {"app", "rexglue-sdk", "tools", "dw5e_manifest.toml"})
@@ -151,7 +165,7 @@ bool prepareLinuxBuildRoot(const fs::path &root, const fs::path &data, fs::path 
         const fs::path src = root / item, dst = buildRoot / item;
         if (fs::is_directory(src, ec))
         {
-            if (!syncDirectory(src, dst, error, true))
+            if (!syncDirectory(src, dst, error, true, src.lexically_normal() == data.lexically_normal() ? buildRoot : data))
                 return false;
         }
         else if (fs::is_regular_file(src, ec))
@@ -159,13 +173,13 @@ bool prepareLinuxBuildRoot(const fs::path &root, const fs::path &data, fs::path 
             fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
             if (ec)
             {
-                error = "cannot copy builder input " + src.string() + ": " + ec.message();
+                error = "cannot copy builder input " + pathText(src) + ": " + ec.message();
                 return false;
             }
         }
         else if (ec && ec != std::errc::no_such_file_or_directory)
         {
-            error = "cannot inspect builder input " + src.string() + ": " + ec.message();
+            error = "cannot inspect builder input " + pathText(src) + ": " + ec.message();
             return false;
         }
         ec.clear();
@@ -181,7 +195,7 @@ bool prepareLinuxBuildRoot(const fs::path &root, const fs::path &data, fs::path 
         out << version;
         if (!out.flush())
         {
-            error = "cannot write Linux builder version in " + buildRoot.string();
+            error = "cannot write Linux builder version in " + pathText(buildRoot);
             return false;
         }
     }
@@ -273,7 +287,7 @@ bool findLayout(const fs::path &root, bool windows, SetupLayout &layout, std::st
         if (release && !fs::is_regular_file(layout.tools.llvmMingwRoot /
             "bin" / "x86_64-w64-mingw32-clang++.exe", ec))
         {
-            error = "bundled Windows compiler toolchain is missing (" + layout.tools.llvmMingwRoot.string() + ")";
+            error = "bundled Windows compiler toolchain is missing (" + pathText(layout.tools.llvmMingwRoot) + ")";
             return false;
         }
     }

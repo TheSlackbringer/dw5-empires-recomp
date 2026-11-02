@@ -30,7 +30,7 @@ std::filesystem::path findRoot(const std::filesystem::path &start);
 bool findLayout(const std::filesystem::path &root, bool windows, SetupLayout &layout, std::string &error);
 
 // Synchronizes source tree into target directory. Incremental: only copies new/modified files.
-bool syncDirectory(const std::filesystem::path &source, const std::filesystem::path &target, std::string &error, bool keepSource = false);
+bool syncDirectory(const std::filesystem::path &source, const std::filesystem::path &target, std::string &error, bool keepSource = false, const std::filesystem::path &excluded = {});
 
 // Stages package sources into stable <dataDir>/builder path on Linux to avoid CMakeCache.txt
 // invalidation caused by random AppImage FUSE mount points (/tmp/.mount_xxxxxx) (commit 553f229).

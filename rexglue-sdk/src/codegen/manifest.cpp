@@ -9,6 +9,7 @@
  *              See LICENSE file in the project root for full license text.
  */
 
+#include <rex/filesystem.h>
 #include <rex/codegen/manifest.h>
 
 #include <algorithm>
@@ -73,9 +74,11 @@ bool LoadBinaryConfig(const toml::table& tbl, const std::filesystem::path& base_
 std::optional<ManifestConfig> ManifestConfig::Load(const std::filesystem::path& path) {
   toml::table tbl;
   try {
-    tbl = toml::parse_file(path.string());
+    std::ifstream input(path);
+    if (!input) { REXLOG_ERROR("Failed to open manifest {}", rex::path_to_utf8(path)); return std::nullopt; }
+    tbl = toml::parse(input, rex::path_to_utf8(path));
   } catch (const toml::parse_error& err) {
-    REXLOG_ERROR("Failed to parse manifest {}: {}", path.string(), err.what());
+    REXLOG_ERROR("Failed to parse manifest {}: {}", rex::path_to_utf8(path), err.what());
     return std::nullopt;
   }
 
@@ -85,19 +88,19 @@ std::optional<ManifestConfig> ManifestConfig::Load(const std::filesystem::path& 
 
   auto* project = tbl["project"].as_table();
   if (!project) {
-    REXLOG_ERROR("Manifest missing [project] section: {}", path.string());
+    REXLOG_ERROR("Manifest missing [project] section: {}", rex::path_to_utf8(path));
     return std::nullopt;
   }
   manifest.projectName = (*project)["name"].value_or<std::string>("");
   if (manifest.projectName.empty()) {
-    REXLOG_ERROR("Manifest missing [project].name: {}", path.string());
+    REXLOG_ERROR("Manifest missing [project].name: {}", rex::path_to_utf8(path));
     return std::nullopt;
   }
   if (!IsValidProjectName(manifest.projectName)) {
     REXLOG_ERROR(
         "Manifest [project].name '{}' is not a valid identifier "
         "(letters, digits, underscore; must not start with a digit): {}",
-        manifest.projectName, path.string());
+        manifest.projectName, rex::path_to_utf8(path));
     return std::nullopt;
   }
   if (auto stamp = (*project)["sdk_version"].value<std::string>(); stamp && !stamp->empty()) {
@@ -109,7 +112,7 @@ std::optional<ManifestConfig> ManifestConfig::Load(const std::filesystem::path& 
 
   auto* entrypoint = tbl["entrypoint"].as_table();
   if (!entrypoint) {
-    REXLOG_ERROR("Manifest missing [entrypoint] section: {}", path.string());
+    REXLOG_ERROR("Manifest missing [entrypoint] section: {}", rex::path_to_utf8(path));
     return std::nullopt;
   }
   if (!LoadBinaryConfig(*entrypoint, manifest.manifestDir, manifest.projectName,
@@ -152,7 +155,9 @@ std::optional<ManifestConfig> ManifestConfig::Load(const std::filesystem::path& 
 
 bool ManifestConfig::IsManifest(const std::filesystem::path& path) {
   try {
-    auto tbl = toml::parse_file(path.string());
+    std::ifstream input(path);
+    if (!input) return false;
+    auto tbl = toml::parse(input, rex::path_to_utf8(path));
     return tbl.contains("project");
   } catch (const toml::parse_error&) {
     return false;
@@ -191,7 +196,7 @@ bool ManifestConfig::WriteSdkVersionStamp(const std::filesystem::path& path,
                                           std::string_view version) {
   std::ifstream in(path);
   if (!in) {
-    REXLOG_ERROR("Failed to open manifest for stamping: {}", path.string());
+    REXLOG_ERROR("Failed to open manifest for stamping: {}", rex::path_to_utf8(path));
     return false;
   }
   std::vector<std::string> lines;
@@ -238,7 +243,7 @@ bool ManifestConfig::WriteSdkVersionStamp(const std::filesystem::path& path,
   {
     std::ofstream out(tmp_path, std::ios::binary);
     if (!out) {
-      REXLOG_ERROR("Failed to open manifest tmp for writing: {}", tmp_path.string());
+      REXLOG_ERROR("Failed to open manifest tmp for writing: {}", rex::path_to_utf8(tmp_path));
       return false;
     }
     for (size_t i = 0; i < lines.size(); ++i) {
@@ -248,7 +253,7 @@ bool ManifestConfig::WriteSdkVersionStamp(const std::filesystem::path& path,
     }
     out << '\n';
     if (!out.good()) {
-      REXLOG_ERROR("Failed while writing manifest tmp: {}", tmp_path.string());
+      REXLOG_ERROR("Failed while writing manifest tmp: {}", rex::path_to_utf8(tmp_path));
       std::error_code ignore;
       std::filesystem::remove(tmp_path, ignore);
       return false;

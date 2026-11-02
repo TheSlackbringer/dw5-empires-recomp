@@ -1,0 +1,887 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 5a0ab9d3..90efe631 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -249,6 +249,11 @@ if(REXGLUE_BUILD_TESTS)
+ endif()
+
+ # Third-party dependencies (vendored sources only)
++# Host paths are UTF-8 in the SDK; Windows file sinks must use native wide filenames.
++# Keep this public dependency setting consistent across SDK consumers and exported targets.
++if(WIN32)
++    set(SPDLOG_WCHAR_FILENAMES ON CACHE BOOL "Native Windows log filenames" FORCE)
++endif()
+ add_subdirectory(thirdparty)
+
+ # Enable warnings after thirdparty
+diff --git a/src/codegen/codegen_writer.cpp b/src/codegen/codegen_writer.cpp
+index a0484fb4..974ab479 100644
+--- a/src/codegen/codegen_writer.cpp
++++ b/src/codegen/codegen_writer.cpp
+@@ -9,6 +9,7 @@
+  *              See LICENSE file in the project root for full license text.
+  */
+
++#include <rex/filesystem.h>
+ #include <rex/codegen/codegen_writer.h>
+ #include "codegen_flags.h"
+
+@@ -175,8 +176,8 @@ bool CodegenWriter::write(bool force) {
+   }
+
+   // --- Output directory setup (from recompile.cpp) ---
+-  std::filesystem::path outputPath = ctx_.configDir() / config().outDirectoryPath;
+-  REXCODEGEN_TRACE("Output path: {}", outputPath.string());
++  std::filesystem::path outputPath = ctx_.configDir() / rex::to_path(config().outDirectoryPath);
++  REXCODEGEN_TRACE("Output path: {}", rex::path_to_utf8(outputPath));
+   std::filesystem::create_directories(outputPath);
+
+   // --- Everything below from recompiler.cpp recompile() ---
+@@ -206,7 +207,7 @@ bool CodegenWriter::write(bool force) {
+
+   TemplateRegistry registry;
+   if (!config().templateDir.empty())
+-    registry.loadOverrides(config().templateDir);
++    registry.loadOverrides(rex::to_path(config().templateDir));
+
+   auto tmplData = buildTemplateData(ctx_, functions, rexcrtByAddr);
+
+@@ -330,7 +331,7 @@ void CodegenWriter::SaveCurrentOutData(const std::string_view name) {
+ }
+
+ bool CodegenWriter::FlushPendingWrites() {
+-  std::filesystem::path outputPath = ctx_.configDir() / config().outDirectoryPath;
++  std::filesystem::path outputPath = ctx_.configDir() / rex::to_path(config().outDirectoryPath);
+
+   std::unordered_set<std::string> emitted;
+   emitted.reserve(pendingWrites.size());
+@@ -344,15 +345,15 @@ bool CodegenWriter::FlushPendingWrites() {
+
+     switch (WriteIfChanged(filePath, content)) {
+       case WriteOutcome::Failed:
+-        REXCODEGEN_ERROR("Failed to write {}", filePath.string());
++        REXCODEGEN_ERROR("Failed to write {}", rex::path_to_utf8(filePath));
+         ok = false;
+         break;
+       case WriteOutcome::Unchanged:
+-        REXCODEGEN_TRACE("Unchanged, skipping write: {}", filePath.string());
++        REXCODEGEN_TRACE("Unchanged, skipping write: {}", rex::path_to_utf8(filePath));
+         unchangedFiles_.push_back(filename);
+         break;
+       case WriteOutcome::Written:
+-        REXCODEGEN_TRACE("Wrote {} bytes to {}", content.size(), filePath.string());
++        REXCODEGEN_TRACE("Wrote {} bytes to {}", content.size(), rex::path_to_utf8(filePath));
+         writtenFiles_.push_back(filename);
+         break;
+     }
+@@ -361,7 +362,7 @@ bool CodegenWriter::FlushPendingWrites() {
+   for (const auto& entry : std::filesystem::directory_iterator(outputPath)) {
+     if (!entry.is_regular_file())
+       continue;
+-    auto filename = entry.path().filename().string();
++    auto filename = rex::path_to_utf8(entry.path().filename());
+     if (emitted.contains(filename))
+       continue;
+     if (!IsGeneratedOutputName(filename, config().projectName))
+@@ -370,10 +371,10 @@ bool CodegenWriter::FlushPendingWrites() {
+     std::error_code ec;
+     std::filesystem::remove(entry.path(), ec);
+     if (ec) {
+-      REXCODEGEN_ERROR("Failed to delete stale output {}: {}", entry.path().string(), ec.message());
++      REXCODEGEN_ERROR("Failed to delete stale output {}: {}", rex::path_to_utf8(entry.path()), ec.message());
+       continue;
+     }
+-    REXCODEGEN_TRACE("Deleted stale output: {}", entry.path().string());
++    REXCODEGEN_TRACE("Deleted stale output: {}", rex::path_to_utf8(entry.path()));
+     deletedFiles_.push_back(filename);
+   }
+
+diff --git a/src/codegen/config.cpp b/src/codegen/config.cpp
+index 5da54a0d..27f8d693 100644
+--- a/src/codegen/config.cpp
++++ b/src/codegen/config.cpp
+@@ -12,6 +12,8 @@
+
+ // TOML config file loading
+
++#include <rex/filesystem.h>
++#include <fstream>
+ #include <algorithm>
+ #include <map>
+ #include <set>
+@@ -391,17 +393,17 @@ bool LoadRecursive(const std::filesystem::path& filePath, RecompilerConfig& cfg,
+                    std::set<std::string>& visited, uint32_t depth) {
+   if (depth > kMaxIncludeDepth) {
+     REXCODEGEN_ERROR("[config] include depth exceeds maximum ({}) at: {}", kMaxIncludeDepth,
+-                     filePath.string());
++                     rex::path_to_utf8(filePath));
+     return false;
+   }
+
+   std::error_code ec;
+   auto canonical = std::filesystem::canonical(filePath, ec);
+   if (ec) {
+-    REXCODEGEN_ERROR("[config] cannot resolve path '{}': {}", filePath.string(), ec.message());
++    REXCODEGEN_ERROR("[config] cannot resolve path '{}': {}", rex::path_to_utf8(filePath), ec.message());
+     return false;
+   }
+-  std::string canonicalStr = canonical.string();
++  std::string canonicalStr = rex::path_to_utf8(canonical);
+   if (visited.contains(canonicalStr)) {
+     REXCODEGEN_ERROR("[config] circular include detected: {}", canonicalStr);
+     return false;
+@@ -411,14 +413,16 @@ bool LoadRecursive(const std::filesystem::path& filePath, RecompilerConfig& cfg,
+
+   toml::table toml;
+   try {
+-    toml = toml::parse_file(canonicalStr);
++    std::ifstream input(canonical);
++    if (!input) { REXCODEGEN_ERROR("Cannot open config file {}", canonicalStr); return false; }
++    toml = toml::parse(input, canonicalStr);
+   } catch (const toml::parse_error& e) {
+     REXCODEGEN_ERROR("Failed to parse config file '{}': {}", canonicalStr, e.what());
+     return false;
+   }
+-  REXCODEGEN_DEBUG("[config] loaded: {}", filePath.filename().string());
++  REXCODEGEN_DEBUG("[config] loaded: {}", rex::path_to_utf8(filePath.filename()));
+   return ApplyTableWithIncludes(toml, canonical.parent_path(), cfg, visited, depth,
+-                                filePath.filename().string());
++                                rex::path_to_utf8(filePath.filename()));
+ }
+
+ bool ApplyTableWithIncludes(const toml::table& tbl, const std::filesystem::path& base_dir,
+@@ -428,7 +432,7 @@ bool ApplyTableWithIncludes(const toml::table& tbl, const std::filesystem::path&
+   if (auto* includesArray = tbl["includes"].as_array()) {
+     for (const auto& elem : *includesArray) {
+       if (auto includePath = elem.value<std::string>()) {
+-        auto resolved = base_dir / *includePath;
++        auto resolved = base_dir / rex::to_path(*includePath);
+         if (!std::filesystem::exists(resolved)) {
+           REXCODEGEN_ERROR("[config] included file not found: {} (resolved from {})", *includePath,
+                            description);
+@@ -492,7 +496,7 @@ bool FinalizeConfig(RecompilerConfig& cfg) {
+
+ bool RecompilerConfig::Load(const std::string_view& configFilePath) {
+   std::set<std::string> visited;
+-  std::filesystem::path path(configFilePath);
++  auto path = rex::to_path(configFilePath);
+   if (!LoadRecursive(path, *this, visited, 0)) {
+     return false;
+   }
+diff --git a/src/codegen/manifest.cpp b/src/codegen/manifest.cpp
+index 4065fdb1..7447f5bb 100644
+--- a/src/codegen/manifest.cpp
++++ b/src/codegen/manifest.cpp
+@@ -9,6 +9,7 @@
+  *              See LICENSE file in the project root for full license text.
+  */
+
++#include <rex/filesystem.h>
+ #include <rex/codegen/manifest.h>
+
+ #include <algorithm>
+@@ -73,9 +74,11 @@ bool LoadBinaryConfig(const toml::table& tbl, const std::filesystem::path& base_
+ std::optional<ManifestConfig> ManifestConfig::Load(const std::filesystem::path& path) {
+   toml::table tbl;
+   try {
+-    tbl = toml::parse_file(path.string());
++    std::ifstream input(path);
++    if (!input) { REXLOG_ERROR("Failed to open manifest {}", rex::path_to_utf8(path)); return std::nullopt; }
++    tbl = toml::parse(input, rex::path_to_utf8(path));
+   } catch (const toml::parse_error& err) {
+-    REXLOG_ERROR("Failed to parse manifest {}: {}", path.string(), err.what());
++    REXLOG_ERROR("Failed to parse manifest {}: {}", rex::path_to_utf8(path), err.what());
+     return std::nullopt;
+   }
+
+@@ -85,19 +88,19 @@ std::optional<ManifestConfig> ManifestConfig::Load(const std::filesystem::path&
+
+   auto* project = tbl["project"].as_table();
+   if (!project) {
+-    REXLOG_ERROR("Manifest missing [project] section: {}", path.string());
++    REXLOG_ERROR("Manifest missing [project] section: {}", rex::path_to_utf8(path));
+     return std::nullopt;
+   }
+   manifest.projectName = (*project)["name"].value_or<std::string>("");
+   if (manifest.projectName.empty()) {
+-    REXLOG_ERROR("Manifest missing [project].name: {}", path.string());
++    REXLOG_ERROR("Manifest missing [project].name: {}", rex::path_to_utf8(path));
+     return std::nullopt;
+   }
+   if (!IsValidProjectName(manifest.projectName)) {
+     REXLOG_ERROR(
+         "Manifest [project].name '{}' is not a valid identifier "
+         "(letters, digits, underscore; must not start with a digit): {}",
+-        manifest.projectName, path.string());
++        manifest.projectName, rex::path_to_utf8(path));
+     return std::nullopt;
+   }
+   if (auto stamp = (*project)["sdk_version"].value<std::string>(); stamp && !stamp->empty()) {
+@@ -109,7 +112,7 @@ std::optional<ManifestConfig> ManifestConfig::Load(const std::filesystem::path&
+
+   auto* entrypoint = tbl["entrypoint"].as_table();
+   if (!entrypoint) {
+-    REXLOG_ERROR("Manifest missing [entrypoint] section: {}", path.string());
++    REXLOG_ERROR("Manifest missing [entrypoint] section: {}", rex::path_to_utf8(path));
+     return std::nullopt;
+   }
+   if (!LoadBinaryConfig(*entrypoint, manifest.manifestDir, manifest.projectName,
+@@ -152,7 +155,9 @@ std::optional<ManifestConfig> ManifestConfig::Load(const std::filesystem::path&
+
+ bool ManifestConfig::IsManifest(const std::filesystem::path& path) {
+   try {
+-    auto tbl = toml::parse_file(path.string());
++    std::ifstream input(path);
++    if (!input) return false;
++    auto tbl = toml::parse(input, rex::path_to_utf8(path));
+     return tbl.contains("project");
+   } catch (const toml::parse_error&) {
+     return false;
+@@ -191,7 +196,7 @@ bool ManifestConfig::WriteSdkVersionStamp(const std::filesystem::path& path,
+                                           std::string_view version) {
+   std::ifstream in(path);
+   if (!in) {
+-    REXLOG_ERROR("Failed to open manifest for stamping: {}", path.string());
++    REXLOG_ERROR("Failed to open manifest for stamping: {}", rex::path_to_utf8(path));
+     return false;
+   }
+   std::vector<std::string> lines;
+@@ -238,7 +243,7 @@ bool ManifestConfig::WriteSdkVersionStamp(const std::filesystem::path& path,
+   {
+     std::ofstream out(tmp_path, std::ios::binary);
+     if (!out) {
+-      REXLOG_ERROR("Failed to open manifest tmp for writing: {}", tmp_path.string());
++      REXLOG_ERROR("Failed to open manifest tmp for writing: {}", rex::path_to_utf8(tmp_path));
+       return false;
+     }
+     for (size_t i = 0; i < lines.size(); ++i) {
+@@ -248,7 +253,7 @@ bool ManifestConfig::WriteSdkVersionStamp(const std::filesystem::path& path,
+     }
+     out << '\n';
+     if (!out.good()) {
+-      REXLOG_ERROR("Failed while writing manifest tmp: {}", tmp_path.string());
++      REXLOG_ERROR("Failed while writing manifest tmp: {}", rex::path_to_utf8(tmp_path));
+       std::error_code ignore;
+       std::filesystem::remove(tmp_path, ignore);
+       return false;
+diff --git a/src/codegen/output_stamp.cpp b/src/codegen/output_stamp.cpp
+index 77ee9067..87d3fa11 100644
+--- a/src/codegen/output_stamp.cpp
++++ b/src/codegen/output_stamp.cpp
+@@ -9,6 +9,7 @@
+  *              See LICENSE file in the project root for full license text.
+  */
+
++#include <rex/filesystem.h>
+ #include <rex/codegen/output_stamp.h>
+
+ #include <fstream>
+@@ -33,7 +34,7 @@ std::optional<OutputStamp> OutputStamp::Load(const std::filesystem::path& path)
+
+   nlohmann::json doc = nlohmann::json::parse(in, nullptr, false);
+   if (doc.is_discarded() || !doc.is_object()) {
+-    REXCODEGEN_WARN("Ignoring malformed codegen stamp: {}", path.string());
++    REXCODEGEN_WARN("Ignoring malformed codegen stamp: {}", rex::path_to_utf8(path));
+     return std::nullopt;
+   }
+
+@@ -87,12 +88,12 @@ std::string ComputeInputFingerprint(std::span<const std::filesystem::path> input
+       if (digest.empty()) {
+         // Weaker than content, but a constant here would report a locked input
+         // as unchanged and skip the module forever.
+-        REXCODEGEN_WARN("Could not read {} for fingerprinting", path.string());
++        REXCODEGEN_WARN("Could not read {} for fingerprinting", rex::path_to_utf8(path));
+         digest = fmt::format("<unreadable:{}:{}>", std::filesystem::file_size(path, ec),
+                              std::filesystem::last_write_time(path, ec).time_since_epoch().count());
+       }
+     }
+-    accumulator += fmt::format("file={} {}\n", path.filename().string(), digest);
++    accumulator += fmt::format("file={} {}\n", rex::path_to_utf8(path.filename()), digest);
+   }
+
+   return rex::hash_bytes(accumulator);
+@@ -101,7 +102,8 @@ std::string ComputeInputFingerprint(std::span<const std::filesystem::path> input
+ namespace {
+
+ std::string EscapeDepfilePath(const std::filesystem::path& path) {
+-  std::string source = std::filesystem::absolute(path).generic_string();
++  const auto utf8 = std::filesystem::absolute(path).generic_u8string();
++  std::string source(utf8.begin(), utf8.end());
+   std::string escaped;
+   escaped.reserve(source.size() + 8);
+   for (char c : source) {
+diff --git a/src/codegen/project_recompiler.cpp b/src/codegen/project_recompiler.cpp
+index 240bcb0c..8e5ae98c 100644
+--- a/src/codegen/project_recompiler.cpp
++++ b/src/codegen/project_recompiler.cpp
+@@ -9,6 +9,7 @@
+  *              See LICENSE file in the project root for full license text.
+  */
+
++#include <rex/filesystem.h>
+ #include <rex/codegen/project_recompiler.h>
+
+ #include <algorithm>
+@@ -47,8 +48,8 @@ namespace rex::codegen {
+ namespace {
+
+ std::string DeriveTargetNameFromFilePath(const std::string& file_path) {
+-  std::filesystem::path p(file_path);
+-  std::string name = p.stem().string();
++  auto p = rex::to_path(file_path);
++  std::string name = rex::path_to_utf8(p.stem());
+   std::replace(name.begin(), name.end(), '.', '_');
+   std::replace(name.begin(), name.end(), ' ', '_');
+   return name;
+@@ -60,14 +61,14 @@ std::vector<std::filesystem::path> CollectModuleInputs(const RecompilerConfig& c
+   namespace fs = std::filesystem;
+
+   std::vector<fs::path> inputs;
+-  inputs.push_back(configDir / cfg.filePath);
++  inputs.push_back(configDir / rex::to_path(cfg.filePath));
+   inputs.push_back(manifestPath);
+   for (const auto& loaded : cfg.loadedFiles) {
+-    inputs.emplace_back(loaded);
++    inputs.push_back(rex::to_path(loaded));
+   }
+   if (!cfg.templateDir.empty()) {
+     std::error_code ec;
+-    for (const auto& entry : fs::recursive_directory_iterator(configDir / cfg.templateDir, ec)) {
++    for (const auto& entry : fs::recursive_directory_iterator(configDir / rex::to_path(cfg.templateDir), ec)) {
+       if (entry.is_regular_file())
+         inputs.push_back(entry.path());
+     }
+@@ -209,10 +210,10 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+
+   const auto& entryConfig = targeted[0].config;
+   auto configDir = manifest_.manifestDir;
+-  fs::path entryXexPath = configDir / entryConfig.filePath;
++  fs::path entryXexPath = configDir / rex::to_path(entryConfig.filePath);
+   if (!fs::exists(entryXexPath)) {
+     return Err<void>(ErrorCategory::IO,
+-                     fmt::format("Entrypoint XEX not found: {}", entryXexPath.string()));
++                     fmt::format("Entrypoint XEX not found: {}", rex::path_to_utf8(entryXexPath)));
+   }
+   entryXexPath = fs::canonical(entryXexPath);
+
+@@ -220,11 +221,11 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+   // manifest override if set; otherwise default to the entrypoint's parent.
+   fs::path gameRoot;
+   if (manifest_.gameRoot && !manifest_.gameRoot->empty()) {
+-    fs::path resolved = configDir / *manifest_.gameRoot;
++    fs::path resolved = configDir / rex::to_path(*manifest_.gameRoot);
+     if (!fs::exists(resolved) || !fs::is_directory(resolved)) {
+       return Err<void>(ErrorCategory::Validation,
+                        fmt::format("[project].game_root '{}' does not resolve to a directory",
+-                                   resolved.string()));
++                                   rex::path_to_utf8(resolved)));
+     }
+     gameRoot = fs::canonical(resolved);
+   } else {
+@@ -235,10 +236,10 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+   if (entryRel.empty() || *entryRel.begin() == "..") {
+     return Err<void>(ErrorCategory::Validation,
+                      fmt::format("Entrypoint XEX '{}' resolves outside game root '{}'",
+-                                 entryXexPath.string(), gameRoot.string()));
++                                 rex::path_to_utf8(entryXexPath), rex::path_to_utf8(gameRoot)));
+   }
+
+-  auto runtime = std::make_unique<Runtime>(gameRoot.string());
++  auto runtime = std::make_unique<Runtime>(gameRoot);
+   auto rtStatus = runtime->Setup(rex::RuntimeConfig{
+       .kernel_init = rex::kernel::InitializeKernel,
+       .tool_mode = true,
+@@ -248,7 +249,7 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+                      fmt::format("Failed to initialize Runtime: {:#x}", rtStatus));
+   }
+
+-  std::string entryRelStr = entryRel.string();
++  std::string entryRelStr = rex::path_to_utf8(entryRel);
+   std::replace(entryRelStr.begin(), entryRelStr.end(), '/', '\\');
+   auto entryVfsPath = "game:\\" + entryRelStr;
+   rtStatus = runtime->LoadXexImage(entryVfsPath);
+@@ -257,17 +258,17 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+                      fmt::format("Failed to load entrypoint XEX: {:#x}", rtStatus));
+   }
+
+-  auto entry_display_name = std::filesystem::path(targeted[0].config.filePath).filename().string();
++  auto entry_display_name = rex::path_to_utf8(rex::to_path(targeted[0].config.filePath).filename());
+   ReportBinaryInfo(opts.reporter, entry_display_name,
+                    *runtime->kernel_state()->GetExecutableModule()->xex_module());
+
+   std::vector<rex::system::object_ref<rex::system::UserModule>> dllModules;
+   for (size_t i = 1; i < targeted.size(); ++i) {
+     const auto& dllConfig = targeted[i].config;
+-    fs::path dllXexPath = configDir / dllConfig.filePath;
++    fs::path dllXexPath = configDir / rex::to_path(dllConfig.filePath);
+     if (!fs::exists(dllXexPath)) {
+       return Err<void>(ErrorCategory::IO,
+-                       fmt::format("DLL XEX not found: {}", dllXexPath.string()));
++                       fmt::format("DLL XEX not found: {}", rex::path_to_utf8(dllXexPath)));
+     }
+     dllXexPath = fs::canonical(dllXexPath);
+
+@@ -275,9 +276,9 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+     if (relPath.empty() || *relPath.begin() == "..") {
+       return Err<void>(ErrorCategory::Validation,
+                        fmt::format("DLL '{}' resolves outside game root '{}': {}",
+-                                   targeted[i].targetName, gameRoot.string(), dllXexPath.string()));
++                                   targeted[i].targetName, rex::path_to_utf8(gameRoot), rex::path_to_utf8(dllXexPath)));
+     }
+-    std::string relStr = relPath.string();
++    std::string relStr = rex::path_to_utf8(relPath);
+     std::replace(relStr.begin(), relStr.end(), '/', '\\');
+     auto dllVfsPath = "game:\\" + relStr;
+     auto userMod = runtime->kernel_state()->LoadUserModule(dllVfsPath, false);
+@@ -287,7 +288,7 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+     }
+     REXCODEGEN_TRACE("Loaded DLL module '{}' at base 0x{:08X}", targeted[i].targetName,
+                      userMod->xex_module()->base_address());
+-    auto dll_display_name = std::filesystem::path(targeted[i].config.filePath).filename().string();
++    auto dll_display_name = rex::path_to_utf8(rex::to_path(targeted[i].config.filePath).filename());
+     ReportBinaryInfo(opts.reporter, dll_display_name, *userMod->xex_module());
+     dllModules.push_back(std::move(userMod));
+   }
+@@ -300,7 +301,7 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+   std::vector<ContextEntry> contexts;
+
+   auto make_display_name = [](const std::string& filePath) {
+-    return std::filesystem::path(filePath).filename().string();
++    return rex::path_to_utf8(rex::to_path(filePath).filename());
+   };
+
+   auto* resolver = runtime->export_resolver();
+@@ -357,7 +358,7 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+
+   for (size_t i = 0; i < contexts.size(); ++i) {
+     auto& entry = contexts[i];
+-    auto outDir = entry.ctx.configDir() / entry.ctx.Config().outDirectoryPath;
++    auto outDir = entry.ctx.configDir() / rex::to_path(entry.ctx.Config().outDirectoryPath);
+     auto inputs =
+         CollectModuleInputs(entry.ctx.Config(), entry.ctx.configDir(), manifest_.manifestPath);
+     fingerprints[i] = FingerprintModule(entry.ctx.Config(), inputs, opts.sdkVersion);
+@@ -440,7 +441,7 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+                          writer.unchangedFiles().end());
+     std::sort(stamp.outputs.begin(), stamp.outputs.end());
+
+-    auto outDir = entry.ctx.configDir() / entry.ctx.Config().outDirectoryPath;
++    auto outDir = entry.ctx.configDir() / rex::to_path(entry.ctx.Config().outDirectoryPath);
+     if (WriteIfChanged(outDir / kStampFileName, stamp.Serialize()) == WriteOutcome::Failed) {
+       return Err<void>(ErrorCategory::IO,
+                        fmt::format("Failed to write stamp for '{}'", entry.module->targetName));
+@@ -454,18 +455,18 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+   }
+
+   if (!contexts.empty()) {
+-    auto buildDir = contexts[0].ctx.configDir() / contexts[0].ctx.Config().outDirectoryPath;
++    auto buildDir = contexts[0].ctx.configDir() / rex::to_path(contexts[0].ctx.Config().outDirectoryPath);
+     std::sort(allInputs.begin(), allInputs.end());
+     allInputs.erase(std::unique(allInputs.begin(), allInputs.end()), allInputs.end());
+
+     auto buildStamp = fs::absolute(buildDir / kBuildStampFileName);
+     if (!WriteDepfile(buildDir / kDepfileName, buildStamp, allInputs)) {
+       return Err<void>(ErrorCategory::IO,
+-                       fmt::format("Failed to write {}", (buildDir / kDepfileName).string()));
++                       fmt::format("Failed to write {}", rex::path_to_utf8((buildDir / kDepfileName))));
+     }
+     // Never WriteIfChanged: the build rule re-runs until this mtime passes its inputs.
+     if (!WriteFileBytes(buildStamp, fmt::format("{}\n", fmt::join(fingerprints, "\n")))) {
+-      return Err<void>(ErrorCategory::IO, fmt::format("Failed to write {}", buildStamp.string()));
++      return Err<void>(ErrorCategory::IO, fmt::format("Failed to write {}", rex::path_to_utf8(buildStamp)));
+     }
+   }
+
+@@ -474,12 +475,12 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+     return Ok();
+   }
+
+-  auto outputPath = contexts[0].ctx.configDir() / contexts[0].ctx.Config().outDirectoryPath;
++  auto outputPath = contexts[0].ctx.configDir() / rex::to_path(contexts[0].ctx.Config().outDirectoryPath);
+   std::error_code mk_ec;
+   fs::create_directories(outputPath, mk_ec);
+   if (mk_ec) {
+     return Err<void>(ErrorCategory::IO, fmt::format("Failed to create output dir {}: {}",
+-                                                    outputPath.string(), mk_ec.message()));
++                                                    rex::path_to_utf8(outputPath), mk_ec.message()));
+   }
+
+   if (opts.reporter)
+@@ -508,15 +509,15 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+     switch (WriteIfChanged(registryPath, registryContent)) {
+       case WriteOutcome::Failed:
+         return Err<void>(ErrorCategory::IO,
+-                         fmt::format("Failed while writing {}", registryPath.string()));
++                         fmt::format("Failed while writing {}", rex::path_to_utf8(registryPath)));
+       case WriteOutcome::Unchanged:
+-        unchangedFiles_.push_back(registryPath.filename().string());
++        unchangedFiles_.push_back(rex::path_to_utf8(registryPath.filename()));
+         break;
+       case WriteOutcome::Written:
+-        writtenFiles_.push_back(registryPath.filename().string());
++        writtenFiles_.push_back(rex::path_to_utf8(registryPath.filename()));
+         break;
+     }
+-    REXCODEGEN_TRACE("Wrote {}", registryPath.string());
++    REXCODEGEN_TRACE("Wrote {}", rex::path_to_utf8(registryPath));
+   }
+   if (opts.reporter)
+     opts.reporter->projectPhaseFinished();
+@@ -545,15 +546,15 @@ Result<void> ProjectRecompiler::Run(const ProjectRecompilerOptions& opts) {
+     switch (WriteIfChanged(dllCmakePath, dllCmakeContent)) {
+       case WriteOutcome::Failed:
+         return Err<void>(ErrorCategory::IO,
+-                         fmt::format("Failed while writing {}", dllCmakePath.string()));
++                         fmt::format("Failed while writing {}", rex::path_to_utf8(dllCmakePath)));
+       case WriteOutcome::Unchanged:
+-        unchangedFiles_.push_back(dllCmakePath.filename().string());
++        unchangedFiles_.push_back(rex::path_to_utf8(dllCmakePath.filename()));
+         break;
+       case WriteOutcome::Written:
+-        writtenFiles_.push_back(dllCmakePath.filename().string());
++        writtenFiles_.push_back(rex::path_to_utf8(dllCmakePath.filename()));
+         break;
+     }
+-    REXCODEGEN_TRACE("Wrote {}", dllCmakePath.string());
++    REXCODEGEN_TRACE("Wrote {}", rex::path_to_utf8(dllCmakePath));
+   }
+   if (opts.reporter)
+     opts.reporter->projectPhaseFinished();
+diff --git a/src/core/cvar.cpp b/src/core/cvar.cpp
+index 228728de..fd35aa56 100644
+--- a/src/core/cvar.cpp
++++ b/src/core/cvar.cpp
+@@ -20,6 +20,7 @@
+ #include <CLI/CLI.hpp>
+
+ #include <rex/cvar.h>
++#include <rex/filesystem.h>
+ #include <rex/logging.h>
+ #include <rex/platform/env.h>
+
+@@ -638,16 +639,18 @@ std::vector<std::string> Init(int argc, char** argv) {
+
+ void LoadConfig(const std::filesystem::path& config_path) {
+   if (!std::filesystem::exists(config_path)) {
+-    REXLOG_DEBUG("Config file not found: {}", config_path.string());
++    REXLOG_DEBUG("Config file not found: {}", rex::path_to_utf8(config_path));
+     return;
+   }
+
+   try {
+-    auto config = toml::parse_file(config_path.string());
++    std::ifstream stream(config_path, std::ios::binary);
++    if (!stream) { REXLOG_ERROR("Failed to open config {}", rex::path_to_utf8(config_path)); return; }
++    auto config = toml::parse(stream, rex::path_to_utf8(config_path));
+     ApplyTomlTable(config, "");
+-    REXLOG_DEBUG("Loaded config from {}", config_path.string());
++    REXLOG_DEBUG("Loaded config from {}", rex::path_to_utf8(config_path));
+   } catch (const toml::parse_error& err) {
+-    REXLOG_ERROR("Failed to parse config {}: {}", config_path.string(), err.what());
++    REXLOG_ERROR("Failed to parse config {}: {}", rex::path_to_utf8(config_path), err.what());
+   }
+ }
+
+@@ -700,12 +703,12 @@ void SaveConfig(const std::filesystem::path& config_path) {
+   try {
+     std::ofstream file(config_path);
+     if (!file) {
+-      REXLOG_ERROR("SaveConfig: failed to open {}", config_path.string());
++      REXLOG_ERROR("SaveConfig: failed to open {}", rex::path_to_utf8(config_path));
+       return;
+     }
+     file << "# Auto-generated cvar configuration\n";
+     file << content;
+-    REXLOG_INFO("Saved config to {}", config_path.string());
++    REXLOG_INFO("Saved config to {}", rex::path_to_utf8(config_path));
+   } catch (const std::exception& e) {
+     REXLOG_ERROR("SaveConfig: {}", e.what());
+   }
+diff --git a/src/core/logging.cpp b/src/core/logging.cpp
+index 1645848c..cda1642f 100644
+--- a/src/core/logging.cpp
++++ b/src/core/logging.cpp
+@@ -13,6 +13,7 @@
+ #include <cctype>
+ #include <charconv>
+ #include <filesystem>
++#include <fstream>
+ #include <mutex>
+ #include <unordered_map>
+ #include <vector>
+@@ -23,6 +24,7 @@
+ #include <toml++/toml.hpp>
+
+ #include <rex/cvar.h>
++#include <rex/filesystem.h>
+ #include <rex/logging.h>
+ #include <rex/platform.h>
+ #include <rex/platform/env.h>
+@@ -80,7 +82,7 @@ std::filesystem::path NextSequentialLogPath(const std::filesystem::path& logs_di
+   for (const auto& entry : std::filesystem::directory_iterator(logs_dir, ec)) {
+     if (!entry.is_regular_file())
+       continue;
+-    auto stem = entry.path().stem().string();
++    auto stem = rex::path_to_utf8(entry.path().stem());
+     if (stem.starts_with(prefix)) {
+       auto num_str = stem.substr(prefix.size());
+       int num = 0;
+@@ -222,12 +224,18 @@ void InitLogging(const LogConfig& config) {
+     resolved_path = config.log_file;
+   } else if (!config.app_name.empty()) {
+     auto log_dir = config.log_dir.empty() ? std::filesystem::current_path() / "logs"
+-                                          : std::filesystem::path(config.log_dir);
+-    resolved_path = NextSequentialLogPath(log_dir, config.app_name).string();
++                                          : rex::to_path(config.log_dir);
++    resolved_path = rex::path_to_utf8(NextSequentialLogPath(log_dir, config.app_name));
+   }
+   if (!resolved_path.empty()) {
++    const auto native_path = rex::to_path(resolved_path);
++#if REX_PLATFORM_WIN32
++    const auto filename = native_path.wstring();
++#else
++    const auto filename = rex::path_to_utf8(native_path);
++#endif
+     auto sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+-        resolved_path, static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
++        filename, static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
+         static_cast<size_t>(REXCVAR_GET(log_max_files)), false);
+     sink->set_level(spdlog::level::trace);
+     sink->set_pattern(config.file_pattern);
+@@ -544,7 +552,9 @@ std::map<std::string, std::string> ParseCategoryLevelsFromConfig(
+     return result;
+
+   try {
+-    auto config = toml::parse_file(config_path.string());
++    std::ifstream stream(config_path, std::ios::binary);
++    if (!stream) return result;
++    auto config = toml::parse(stream, rex::path_to_utf8(config_path));
+     auto* log_table = config["log"].as_table();
+     if (!log_table)
+       return result;
+diff --git a/src/rexglue/commands/codegen_command.cpp b/src/rexglue/commands/codegen_command.cpp
+index df7a2e8e..74416bf9 100644
+--- a/src/rexglue/commands/codegen_command.cpp
++++ b/src/rexglue/commands/codegen_command.cpp
+@@ -6,6 +6,7 @@
+  * @license     BSD 3-Clause License
+  */
+
++#include <rex/filesystem.h>
+ #include "codegen_command.h"
+ #include "../ui/progress.h"
+ #include "../ui/ui.h"
+@@ -40,7 +41,7 @@ void EmitManualReview(std::span<const SourceWarning> warnings, std::string_view
+   rows.reserve(warnings.size());
+   for (const auto& w : warnings) {
+     rows.push_back(
+-        {fmt::format("{}:{}", w.file.generic_string(), w.line_number), w.detail, w.hint});
++        {fmt::format("{}:{}", rex::path_to_utf8(w.file), w.line_number), w.detail, w.hint});
+   }
+   ui::ManualReviewList(std::string(header), rows);
+ }
+@@ -113,7 +114,7 @@ rex::Result<ManifestSummary> LoadManifestSummary(const fs::path& manifest_path)
+
+ void EmitProjectHeader(const fs::path& manifest_path, const ManifestSummary& summary) {
+   std::vector<ui::KeyValueRow> rows;
+-  rows.push_back({"Manifest", manifest_path.generic_string()});
++  rows.push_back({"Manifest", rex::path_to_utf8(manifest_path)});
+   if (!summary.project_name.empty()) {
+     rows.push_back({"Project", summary.project_name});
+   }
+@@ -155,7 +156,7 @@ Result<std::string> DiscoverManifestInCwd() {
+       continue;
+     if (entry.path().extension() != ".toml")
+       continue;
+-    auto stem = entry.path().stem().string();
++    auto stem = rex::path_to_utf8(entry.path().stem());
+     if (stem.size() >= 9 && std::string_view{stem}.substr(stem.size() - 9) == "_manifest") {
+       manifests.push_back(entry.path());
+     } else {
+@@ -164,28 +165,28 @@ Result<std::string> DiscoverManifestInCwd() {
+   }
+
+   if (manifests.size() == 1)
+-    return rex::Ok(manifests.front().string());
++    return rex::Ok(rex::path_to_utf8(manifests.front()));
+   if (manifests.size() > 1) {
+     return Err<std::string>(
+         rex::ErrorCategory::Config,
+-        fmt::format("Multiple *_manifest.toml files in {}; pass one explicitly", cwd.string()));
++        fmt::format("Multiple *_manifest.toml files in {}; pass one explicitly", rex::path_to_utf8(cwd)));
+   }
+   if (other_tomls.size() == 1)
+-    return rex::Ok(other_tomls.front().string());
++    return rex::Ok(rex::path_to_utf8(other_tomls.front()));
+   if (other_tomls.size() > 1) {
+     return Err<std::string>(
+         rex::ErrorCategory::Config,
+-        fmt::format("Multiple .toml files in {}; pass the manifest explicitly", cwd.string()));
++        fmt::format("Multiple .toml files in {}; pass the manifest explicitly", rex::path_to_utf8(cwd)));
+   }
+   return Err<std::string>(rex::ErrorCategory::Config,
+-                          fmt::format("No manifest .toml found in {}", cwd.string()));
++                          fmt::format("No manifest .toml found in {}", rex::path_to_utf8(cwd)));
+ }
+
+ Result<void> CodegenFromConfig(const std::string& config_path, const CliContext& ctx,
+                                const std::vector<std::string>& targets, bool ignore_stamp) {
+   REXLOG_TRACE("Generating code with config: {}", config_path);
+
+-  fs::path manifest_path = config_path;
++  fs::path manifest_path = rex::to_path(config_path);
+   if (!rex::codegen::ManifestConfig::IsManifest(manifest_path)) {
+     return Err<void>(
+         rex::ErrorCategory::Config,
+diff --git a/src/rexglue/main.cpp b/src/rexglue/main.cpp
+index 201b623a..25562886 100644
+--- a/src/rexglue/main.cpp
++++ b/src/rexglue/main.cpp
+@@ -58,6 +58,7 @@ void ConfigureLogging(const std::string& level, const std::string& log_file, boo
+
+ int main(int argc, char** argv) {
+   CLI::App app{TitleString(), "rexglue"};
++  argv = app.ensure_utf8(argv); // CLI11 uses the native Windows command line; POSIX is unchanged.
+   app.set_version_flag("--version", REXGLUE_VERSION_STRING);
+   app.require_subcommand(1);
+   // Lets cvar overrides be spelled after the subcommand name.
+diff --git a/src/system/runtime.cpp b/src/system/runtime.cpp
+index c10694c8..e4ddad31 100644
+--- a/src/system/runtime.cpp
++++ b/src/system/runtime.cpp
+@@ -9,6 +9,7 @@
+  *              See LICENSE file in the project root for full license text.
+  */
+
++#include <rex/filesystem.h>
+ #include <rex/chrono/clock.h>
+ #include <rex/cvar.h>
+ #include <rex/filesystem/devices/host_path_device.h>
+@@ -299,7 +300,7 @@ bool Runtime::SetupVfs() {
+
+   auto abs_game_root = std::filesystem::absolute(game_data_root_);
+   if (!std::filesystem::exists(abs_game_root)) {
+-    REXSYS_ERROR("Runtime::SetupVfs: game_data_root does not exist: {}", abs_game_root.string());
++    REXSYS_ERROR("Runtime::SetupVfs: game_data_root does not exist: {}", rex::path_to_utf8(abs_game_root));
+     return false;
+   }
+
+@@ -315,7 +316,7 @@ bool Runtime::SetupVfs() {
+     REXSYS_ERROR("Runtime::SetupVfs: Failed to register host path device");
+     return false;
+   }
+-  REXSYS_DEBUG("  Mounted {} at {}", abs_game_root.string(), mount_path);
++  REXSYS_DEBUG("  Mounted {} at {}", rex::path_to_utf8(abs_game_root), mount_path);
+
+   // Register symbolic links for game: and D:
+   file_system_->RegisterSymbolicLink("game:", mount_path);
+@@ -331,7 +332,7 @@ bool Runtime::SetupVfs() {
+           std::make_unique<rex::filesystem::HostPathDevice>(update_mount, abs_update_root, true);
+       if (update_device->Initialize() && file_system_->RegisterDevice(std::move(update_device))) {
+         file_system_->RegisterSymbolicLink("update:", update_mount);
+-        REXSYS_DEBUG("  Mounted {} at update:", abs_update_root.string());
++        REXSYS_DEBUG("  Mounted {} at update:", rex::path_to_utf8(abs_update_root));
+       }
+     }
+   }
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+index 0a451725..33ee4c3b 100644
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -108,14 +108,14 @@ bool ReXApp::SetupEnvironment() {
+   std::filesystem::path game_dir;
+   std::string game_data_cvar = REXCVAR_GET(game_data_root);
+   if (!game_data_cvar.empty()) {
+-    game_dir = game_data_cvar;
++    game_dir = rex::to_path(game_data_cvar);
+   }
+
+   // User data: cvar override, or platform user directory
+   std::filesystem::path user_dir;
+   std::string user_data_cvar = REXCVAR_GET(user_data_root);
+   if (!user_data_cvar.empty()) {
+-    user_dir = user_data_cvar;
++    user_dir = rex::to_path(user_data_cvar);
+   } else {
+     user_dir = rex::filesystem::GetUserFolder() / GetName();
+   }
+@@ -124,14 +124,14 @@ bool ReXApp::SetupEnvironment() {
+   std::filesystem::path update_dir;
+   std::string update_data_cvar = REXCVAR_GET(update_data_root);
+   if (!update_data_cvar.empty()) {
+-    update_dir = update_data_cvar;
++    update_dir = rex::to_path(update_data_cvar);
+   }
+
+   // Cache: cvar override, or user_dir/cache
+   std::filesystem::path cache_dir;
+   std::string cache_root_cvar = REXCVAR_GET(cache_root);
+   if (!cache_root_cvar.empty()) {
+-    cache_dir = cache_root_cvar;
++    cache_dir = rex::to_path(cache_root_cvar);
+   } else {
+     cache_dir = user_dir / "cache";
+   }
+@@ -139,7 +139,7 @@ bool ReXApp::SetupEnvironment() {
+   std::filesystem::path metadata_dir;
+   std::string metadata_root_cvar = REXCVAR_GET(metadata_root);
+   if (!metadata_root_cvar.empty()) {
+-    metadata_dir = metadata_root_cvar;
++    metadata_dir = rex::to_path(metadata_root_cvar);
+   }
+
+   PathConfig path_config{game_dir,  user_dir,     update_dir,
+@@ -168,7 +168,7 @@ bool ReXApp::SetupEnvironment() {
+                                         log_level_str, category_levels);
+   if (log_file_cvar.empty()) {
+     log_config.app_name = std::string(GetName());
+-    log_config.log_dir = (exe_dir / "logs").string();
++    log_config.log_dir = rex::path_to_utf8((exe_dir / "logs"));
+   }
+
+   rex::InitLogging(log_config);
+@@ -180,21 +180,21 @@ bool ReXApp::SetupEnvironment() {
+   OnPostInitLogging();
+
+   if (std::filesystem::exists(config_path_))
+-    REXLOG_DEBUG("Loaded config: {}", config_path_.filename().string());
++    REXLOG_DEBUG("Loaded config: {}", rex::path_to_utf8(config_path_.filename()));
+
+   REXLOG_DEBUG("{} starting", GetName());
+   if (!game_data_root_.empty()) {
+-    REXLOG_DEBUG("  Game directory: {}", game_data_root_.string());
++    REXLOG_DEBUG("  Game directory: {}", rex::path_to_utf8(game_data_root_));
+   }
+   if (!user_data_root_.empty()) {
+-    REXLOG_DEBUG("  User data:      {}", user_data_root_.string());
++    REXLOG_DEBUG("  User data:      {}", rex::path_to_utf8(user_data_root_));
+   }
+   if (!update_data_root_.empty()) {
+-    REXLOG_DEBUG("  Update data:    {}", update_data_root_.string());
++    REXLOG_DEBUG("  Update data:    {}", rex::path_to_utf8(update_data_root_));
+   }
+-  REXLOG_DEBUG("  Cache root:     {}", cache_root_.string());
++  REXLOG_DEBUG("  Cache root:     {}", rex::path_to_utf8(cache_root_));
+   if (!metadata_root_.empty()) {
+-    REXLOG_DEBUG("  Metadata root:  {}", metadata_root_.string());
++    REXLOG_DEBUG("  Metadata root:  {}", rex::path_to_utf8(metadata_root_));
+   }
+
+   return true;
+@@ -208,7 +208,7 @@ bool ReXApp::ConstructRuntime(const PathConfig& paths) {
+     return false;
+   }
+   if (!std::filesystem::is_directory(paths.game_data_root)) {
+-    auto msg = fmt::format("--game_data_root does not exist: {}", paths.game_data_root.string());
++    auto msg = fmt::format("--game_data_root does not exist: {}", rex::path_to_utf8(paths.game_data_root));
+     REXLOG_ERROR("{}", msg);
+     rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);
+     return false;
+@@ -276,7 +276,7 @@ bool ReXApp::ConstructRuntime(const PathConfig& paths) {
+     std::replace(host_tail.begin(), host_tail.end(), '\\', '/');
+     auto xex_host = paths.game_data_root / host_tail;
+     if (!std::filesystem::is_regular_file(xex_host)) {
+-      auto msg = fmt::format("Entrypoint XEX not found: {}", xex_host.string());
++      auto msg = fmt::format("Entrypoint XEX not found: {}", rex::path_to_utf8(xex_host));
+       REXLOG_ERROR("{}", msg);
+       rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);
+       return false;

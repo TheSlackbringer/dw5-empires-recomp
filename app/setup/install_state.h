@@ -1,5 +1,5 @@
 #pragma once
-// Tracks player installation state in %LOCALAPPDATA%\DW5E (Windows) or ~/.local/share/dw5e (Linux).
+// Tracks player installation state under the selected portable installation folder.
 // Fast checks verify that extracted game files exist before codegen/compilation or launching.
 
 #include <filesystem>
@@ -7,8 +7,8 @@
 
 namespace dw5e::setup {
 
-// Windows: %LOCALAPPDATA%\DW5E. Linux: $XDG_DATA_HOME/dw5e, else ~/.local/share/dw5e.
-// DW5E_DATA_DIR overrides it for automated tests or custom portable installs.
+// Actual launcher/AppImage directory, remembered choice, or explicit DW5E_DATA_DIR.
+// Returns empty on discovery/configuration error; never chooses a user-data fallback.
 std::filesystem::path playerDataDir();
 
 enum class InstallState

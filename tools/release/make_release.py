@@ -47,8 +47,26 @@ Play
   4. Every later start of DW5E.exe starts the game at once (<1 second).
 
 Your files
-  Game files, the built game, saves, settings and logs are in %LOCALAPPDATA%\\DW5E.
-  A newer version of this folder rebuilds the game once and keeps your saves.
+  By default, game files, the built game, saves, settings, shader caches and logs stay beside
+  DW5E.exe. Setup shows the destination before installation. Use that folder, edit the path,
+  or use Choose folder. A custom choice is remembered in dw5e-install.json beside DW5E.exe.
+  The release folder must be writable to remember a choice. Move it or choose another
+  writable destination when setup reports an access error; no other location is chosen for you.
+  Move the complete folder on the same platform to keep the installed game and your saves.
+  A child-folder choice moves with it; an external custom folder stays where you selected it.
+  Update release files in place, preserving dw5e-install.json and all your installation files.
+  A required rebuild uses the installed game files, without asking for the ISO again.
+  Console setup: --data-dir <folder>. Advanced automation may use DW5E_DATA_DIR.
+  Priority: --data-dir, DW5E_DATA_DIR, remembered choice, launcher folder.
+  Explicit overrides apply to one invocation and do not overwrite your remembered GUI choice.
+
+Migration from an older release
+  Older Windows releases used %LOCALAPPDATA%\\DW5E. Keep that original as a backup.
+  Before starting the new launcher, copy the old installation's contents into your new
+  chosen destination. Keep the new release files when names conflict; the old generated
+  root dw5e_manifest.toml is not needed. Copy saves and settings too; do not move or delete
+  the original. Select the destination if it is outside the launcher folder. The launcher
+  recognizes installed game files and rebuilds if needed, without another ISO extraction.
 
 Controls (Default Xbox 360 Gamepad / Keyboard):
   A / Space       - Jump
@@ -82,8 +100,28 @@ Play
   4. Later starts open the game directly without rebuilding.
 
 Your files
-  Game files, the built game, saves, and logs stay in $XDG_DATA_HOME/dw5e (normally ~/.local/share/dw5e),
-  separate from this AppImage.
+  By default, game files, the built game, saves, settings, shader caches, logs and the writable
+  builder stay beside the original AppImage, outside its temporary mount. An extracted
+  package uses its outer directory. Setup shows the destination before installation: use
+  that folder, edit the path, or use Choose folder. The choice is remembered beside the
+  launcher in dw5e-install.json. The release folder must be writable to save this choice.
+  An access error asks you to choose another folder or move the release; there is no fallback.
+  Move the complete installation folder on the same platform to retain the game and saves.
+  Relative child-folder choices move with it; external custom folders remain where selected.
+  Replace release files in place, preserving dw5e-install.json and your installation files.
+  A needed rebuild uses the installed game files without requesting the ISO again.
+  Console setup: --data-dir <folder>. Advanced automation may use DW5E_DATA_DIR.
+  Priority: --data-dir, DW5E_DATA_DIR, remembered choice, launcher folder.
+  Explicit invocation overrides do not replace your remembered GUI choice.
+
+Migration from an older release
+  Older releases used $XDG_DATA_HOME/dw5e (normally ~/.local/share/dw5e). Keep it as a backup.
+  Before starting the new launcher, copy the old installation's contents, including saves
+  and settings, into the new chosen destination. Keep new release files if names conflict;
+  the old generated root dw5e_manifest.toml is not needed. Never move or delete the original.
+  Select the destination if external. The launcher recognizes the installed game and can
+  rebuild from it without another extraction or ISO. Keep the AppImage alongside its
+  dw5e-install.json when updating; the launcher waits for the game before its mount closes.
 
 Requires x86-64 Linux with glibc 2.31 or newer and a Vulkan graphics driver.
 Source code: https://github.com/TheSlackbringer/dw5-empires-recomp (GPL-3.0), version {build}.

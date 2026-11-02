@@ -13,6 +13,7 @@
 #include <cctype>
 #include <charconv>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +24,7 @@
 #include <toml++/toml.hpp>
 
 #include <rex/cvar.h>
+#include <rex/filesystem.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
 #include <rex/platform/env.h>
@@ -80,7 +82,7 @@ std::filesystem::path NextSequentialLogPath(const std::filesystem::path& logs_di
   for (const auto& entry : std::filesystem::directory_iterator(logs_dir, ec)) {
     if (!entry.is_regular_file())
       continue;
-    auto stem = entry.path().stem().string();
+    auto stem = rex::path_to_utf8(entry.path().stem());
     if (stem.starts_with(prefix)) {
       auto num_str = stem.substr(prefix.size());
       int num = 0;
@@ -222,12 +224,18 @@ void InitLogging(const LogConfig& config) {
     resolved_path = config.log_file;
   } else if (!config.app_name.empty()) {
     auto log_dir = config.log_dir.empty() ? std::filesystem::current_path() / "logs"
-                                          : std::filesystem::path(config.log_dir);
-    resolved_path = NextSequentialLogPath(log_dir, config.app_name).string();
+                                          : rex::to_path(config.log_dir);
+    resolved_path = rex::path_to_utf8(NextSequentialLogPath(log_dir, config.app_name));
   }
   if (!resolved_path.empty()) {
+    const auto native_path = rex::to_path(resolved_path);
+#if REX_PLATFORM_WIN32
+    const auto filename = native_path.wstring();
+#else
+    const auto filename = rex::path_to_utf8(native_path);
+#endif
     auto sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-        resolved_path, static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
+        filename, static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
         static_cast<size_t>(REXCVAR_GET(log_max_files)), false);
     sink->set_level(spdlog::level::trace);
     sink->set_pattern(config.file_pattern);
@@ -544,7 +552,9 @@ std::map<std::string, std::string> ParseCategoryLevelsFromConfig(
     return result;
 
   try {
-    auto config = toml::parse_file(config_path.string());
+    std::ifstream stream(config_path, std::ios::binary);
+    if (!stream) return result;
+    auto config = toml::parse(stream, rex::path_to_utf8(config_path));
     auto* log_table = config["log"].as_table();
     if (!log_table)
       return result;

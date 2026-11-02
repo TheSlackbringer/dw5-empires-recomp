@@ -9,6 +9,7 @@
  *              See LICENSE file in the project root for full license text.
  */
 
+#include <rex/filesystem.h>
 #include <rex/codegen/codegen_writer.h>
 #include "codegen_flags.h"
 
@@ -175,8 +176,8 @@ bool CodegenWriter::write(bool force) {
   }
 
   // --- Output directory setup (from recompile.cpp) ---
-  std::filesystem::path outputPath = ctx_.configDir() / config().outDirectoryPath;
-  REXCODEGEN_TRACE("Output path: {}", outputPath.string());
+  std::filesystem::path outputPath = ctx_.configDir() / rex::to_path(config().outDirectoryPath);
+  REXCODEGEN_TRACE("Output path: {}", rex::path_to_utf8(outputPath));
   std::filesystem::create_directories(outputPath);
 
   // --- Everything below from recompiler.cpp recompile() ---
@@ -206,7 +207,7 @@ bool CodegenWriter::write(bool force) {
 
   TemplateRegistry registry;
   if (!config().templateDir.empty())
-    registry.loadOverrides(config().templateDir);
+    registry.loadOverrides(rex::to_path(config().templateDir));
 
   auto tmplData = buildTemplateData(ctx_, functions, rexcrtByAddr);
 
@@ -330,7 +331,7 @@ void CodegenWriter::SaveCurrentOutData(const std::string_view name) {
 }
 
 bool CodegenWriter::FlushPendingWrites() {
-  std::filesystem::path outputPath = ctx_.configDir() / config().outDirectoryPath;
+  std::filesystem::path outputPath = ctx_.configDir() / rex::to_path(config().outDirectoryPath);
 
   std::unordered_set<std::string> emitted;
   emitted.reserve(pendingWrites.size());
@@ -344,15 +345,15 @@ bool CodegenWriter::FlushPendingWrites() {
 
     switch (WriteIfChanged(filePath, content)) {
       case WriteOutcome::Failed:
-        REXCODEGEN_ERROR("Failed to write {}", filePath.string());
+        REXCODEGEN_ERROR("Failed to write {}", rex::path_to_utf8(filePath));
         ok = false;
         break;
       case WriteOutcome::Unchanged:
-        REXCODEGEN_TRACE("Unchanged, skipping write: {}", filePath.string());
+        REXCODEGEN_TRACE("Unchanged, skipping write: {}", rex::path_to_utf8(filePath));
         unchangedFiles_.push_back(filename);
         break;
       case WriteOutcome::Written:
-        REXCODEGEN_TRACE("Wrote {} bytes to {}", content.size(), filePath.string());
+        REXCODEGEN_TRACE("Wrote {} bytes to {}", content.size(), rex::path_to_utf8(filePath));
         writtenFiles_.push_back(filename);
         break;
     }
@@ -361,7 +362,7 @@ bool CodegenWriter::FlushPendingWrites() {
   for (const auto& entry : std::filesystem::directory_iterator(outputPath)) {
     if (!entry.is_regular_file())
       continue;
-    auto filename = entry.path().filename().string();
+    auto filename = rex::path_to_utf8(entry.path().filename());
     if (emitted.contains(filename))
       continue;
     if (!IsGeneratedOutputName(filename, config().projectName))
@@ -370,10 +371,10 @@ bool CodegenWriter::FlushPendingWrites() {
     std::error_code ec;
     std::filesystem::remove(entry.path(), ec);
     if (ec) {
-      REXCODEGEN_ERROR("Failed to delete stale output {}: {}", entry.path().string(), ec.message());
+      REXCODEGEN_ERROR("Failed to delete stale output {}: {}", rex::path_to_utf8(entry.path()), ec.message());
       continue;
     }
-    REXCODEGEN_TRACE("Deleted stale output: {}", entry.path().string());
+    REXCODEGEN_TRACE("Deleted stale output: {}", rex::path_to_utf8(entry.path()));
     deletedFiles_.push_back(filename);
   }
 

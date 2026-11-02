@@ -1,4 +1,5 @@
 #include "install_state.h"
+#include "install_location.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -9,26 +10,11 @@ namespace fs = std::filesystem;
 
 fs::path playerDataDir()
 {
-    if (const char *env = std::getenv("DW5E_DATA_DIR"))
-    {
-        if (*env)
-            return fs::path(env);
-    }
-#ifdef _WIN32
-    if (const char *local = std::getenv("LOCALAPPDATA"))
-        return fs::path(local) / "DW5E";
-    if (const char *user = std::getenv("USERPROFILE"))
-        return fs::path(user) / "AppData" / "Local" / "DW5E";
-#else
-    if (const char *xdg = std::getenv("XDG_DATA_HOME"))
-    {
-        if (*xdg)
-            return fs::path(xdg) / "dw5e";
-    }
-    if (const char *home = std::getenv("HOME"))
-        return fs::path(home) / ".local" / "share" / "dw5e";
-#endif
-    return {};
+    std::string error;
+    const auto launcher = launcherDirectory(error);
+    fs::path destination;
+    bool explicitOverride = false;
+    return resolveInstallLocation(launcher, {}, destination, explicitOverride, error) ? destination : fs::path{};
 }
 
 InstallState installState(const fs::path &dataDir, std::string *problem)
@@ -66,7 +52,7 @@ bool writeInstallMarker(const fs::path &dataDir, const std::string &discSha1, st
     fs::create_directories(dataDir / "game", ec);
     if (ec)
     {
-        error = "cannot create directory " + (dataDir / "game").string();
+        error = "cannot create directory " + pathText(dataDir / "game");
         return false;
     }
 
@@ -74,7 +60,7 @@ bool writeInstallMarker(const fs::path &dataDir, const std::string &discSha1, st
     std::ofstream out(marker, std::ios::trunc);
     if (!out)
     {
-        error = "cannot write install marker to " + marker.string();
+        error = "cannot write install marker to " + pathText(marker);
         return false;
     }
 
@@ -82,7 +68,7 @@ bool writeInstallMarker(const fs::path &dataDir, const std::string &discSha1, st
     out << "sha1: " << discSha1 << "\n";
     if (!out.flush())
     {
-        error = "cannot finish writing install marker " + marker.string();
+        error = "cannot finish writing install marker " + pathText(marker);
         return false;
     }
     return true;
