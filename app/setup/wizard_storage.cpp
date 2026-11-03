@@ -35,6 +35,25 @@ bool prepareWizardSelection(WizardConfig &config, InstallFolderSelection &select
     if (config.manageOnly && config.importSource.empty())
         return selection.error.empty() &&
                prepareWizardInstallation(config, selection.destination, selection.error);
+    if (!selection.error.empty())
+        return false;
+    Installation installation;
+    if (selection.destination.empty() ||
+        !loadInstallation(selection.destination, installation, selection.error))
+    {
+        if (selection.error.empty())
+            selection.error = "Choose an installation folder.";
+        return false;
+    }
+    const bool portable = (config.modeChosen ? config.desiredMode : installation.mode) == SaveMode::Portable;
+    if (portable)
+    {
+        // Portable mode keeps its installation record in <game folder>/install.json.
+        if (!prepareWizardInstallation(config, selection.destination, selection.error))
+            return false;
+        selection.frozen = true;
+        return true;
+    }
     if (config.importSource.empty())
         return selection.prepare() &&
                prepareWizardInstallation(config, selection.destination, selection.error);

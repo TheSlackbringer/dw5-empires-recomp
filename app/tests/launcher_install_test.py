@@ -479,6 +479,17 @@ class LauncherInstallTests(unittest.TestCase):
             self.assertFalse(reader.is_alive(),'owned native ready-reader completed')
             process.stdin.close();process.stdout.close();process.stderr.close()
 
+    def test_custom_portable_update_keeps_metadata_inside_the_installation(self):
+        selected = self.root / 'custom portable'
+        self.installed(selected)
+        put(selected / 'install.json', json.dumps({'version': 1, 'save_mode': 'portable'}))
+        put(selected / 'user-data/save/progress', 'portable progress')
+        self.env['DW5E_FIXTURE_GUI_FOLDER'] = str(selected)
+        self.launch('--no-window', '--rebuild', driver=True)
+        self.assertFalse((self.package / 'dw5e-install.json').exists())
+        self.assertEqual(json.loads((selected / 'install.json').read_text())['save_mode'], 'portable')
+        self.assertEqual((selected / 'user-data/save/progress').read_text(), 'portable progress')
+
     def test_portable_copy_to_new_release_retains_mode_without_user_folder_writes(self):
         installed=self.package/'game-files';self.installed(installed)
         put(installed/'install.json',json.dumps({'version':1,'save_mode':'portable'}))

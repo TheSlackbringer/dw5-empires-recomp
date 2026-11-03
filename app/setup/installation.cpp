@@ -697,7 +697,8 @@ bool uninstallGameFiles(const fs::path &selected, const fs::path &launcher, bool
     Installation installation;
     if (!loadInstallation(root, installation, error))
         return false;
-    if (rememberForReinstall && !rememberInstallLocation(launcher, root, error))
+    if (rememberForReinstall && installation.mode != SaveMode::Portable &&
+        !rememberInstallLocation(launcher, root, error))
         return false;
     // Persist legacy mode before removing the marker that originally implied it.
     if (!installation.recorded && !saveInstallation(installation, error))

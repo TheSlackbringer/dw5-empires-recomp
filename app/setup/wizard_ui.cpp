@@ -263,24 +263,23 @@ bool runWizardWindow(WizardConfig &config)
     bool folderHasInstallation = false;
     enum class Page { Saves, Disc, Existing, Other, Manage, Uninstall, Uninstalled, Copied, Saved, PreparationFailed };
     const auto hasDisc = [&] { return installState(destination.destination) == InstallState::Installed; };
-    Installation initialInstallation;
-    std::string initialMetadataError;
-    const bool savedMode = !destination.destination.empty() &&
-        loadInstallation(destination.destination, initialInstallation, initialMetadataError) && initialInstallation.recorded;
     Page page = config.manageOnly ? Page::Manage
               : !config.importSource.empty() ? Page::Saves
               : hasDisc() ? Page::Existing
               : !config.discovered.empty() || !destination.error.empty() ? Page::Other
-              : savedMode || config.modeChosen || config.launcherDir.empty() ? Page::Disc : Page::Saves;
+              : Page::Disc;
     Page returnFromOptions = page;
-    const auto openOptions = [&] {
+    bool choosingInstallDestination = false;
+    const auto openOptions = [&](bool installDestination = false) {
         folderDialog = std::make_shared<DialogState>();
         folderError.clear();
         checkedFolder.clear();
         folderChoice.clear();
         createFolder = false;
         folderHasInstallation = false;
-        const auto path = page == Page::Saves ? std::string{} : pathText(destination.destination);
+        choosingInstallDestination = installDestination;
+        const auto path = page == Page::Disc && !installDestination
+            ? std::string{} : pathText(destination.destination);
         std::snprintf(folderInput, sizeof(folderInput), "%s", path.c_str());
         returnFromOptions = page;
         page = Page::Other;
@@ -329,8 +328,7 @@ bool runWizardWindow(WizardConfig &config)
                 if(preparation) closeAfterPreparation=true;
                 else quit = true;
             }
-            else if (event.type == SDL_EVENT_DROP_FILE && !activeRun && !preparation &&
-                     (page == Page::Saves || page == Page::Disc))
+            else if (event.type == SDL_EVENT_DROP_FILE && !activeRun && !preparation && page == Page::Disc)
             {
                 if (event.drop.data)
                 {
@@ -502,7 +500,7 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::TextWrapped("%s", error.c_str());
                 ImGui::PopStyleColor();
             };
-            const auto chooseMode = [&](SaveMode initial) {
+            const auto chooseMode = [&](SaveMode initial, const fs::path &previewRoot = {}) {
                 const SaveMode desired = config.modeChosen ? config.desiredMode : initial;
                 if (ImGui::RadioButton("On this PC (recommended)", desired == SaveMode::Normal)) {
                     config.desiredMode = SaveMode::Normal;
@@ -517,7 +515,7 @@ bool runWizardWindow(WizardConfig &config)
                     config.conflict = SaveConflict::Ask;
                 }
                 Installation preview;
-                preview.root = destination.destination;
+                preview.root = previewRoot.empty() ? destination.destination : previewRoot;
                 configureSaveMode(preview, config.modeChosen ? config.desiredMode : initial);
                 ImGui::TextWrapped("Saves: %s", pathText(preview.userData).c_str());
                 if (preview.configDir != preview.userData)
@@ -660,22 +658,13 @@ bool runWizardWindow(WizardConfig &config)
                     beginPreparation();
             }
             else if (!activeRun && page == Page::Saves) {
-                ImGui::TextDisabled(config.importSource.empty() ? "Step 1 of 3" : "Copy installation");
-                ImGui::TextUnformatted(copyFromManagement ? "Where should the copy keep its saves?"
-                                                         : "Where should saves and settings be stored?");
-                Installation selectedMode;
-                std::string modeError;
-                const auto defaultMode = config.importSource.empty() &&
-                    loadInstallation(destination.destination, selectedMode, modeError)
-                    ? selectedMode.mode : SaveMode::Normal;
-                chooseMode(defaultMode);
+                ImGui::TextDisabled("Copy installation");
+                ImGui::TextUnformatted("Where should the copy keep its saves?");
+                chooseMode(SaveMode::Normal);
                 if (copyFromManagement)
                     ImGui::TextWrapped("Choose Portable if you want saves and settings to travel with the copy.");
                 showError(actionError);
                 ImGui::Spacing();
-                if (!destination.explicitOverride && config.importSource.empty() &&
-                    link("Find an existing installation..."))
-                    openOptions();
                 const auto actions = footer(copyFromManagement ? "Back" : nullptr,
                                             "Continue");
                 if (actions.back) {
@@ -687,9 +676,8 @@ bool runWizardWindow(WizardConfig &config)
                         page = Page::Manage;
                     }
                 }
-                if (actions.primary) {
-                    page = config.importSource.empty() ? Page::Disc : Page::Existing;
-                }
+                if (actions.primary)
+                    page = Page::Existing;
             }
             else if (!activeRun && page == Page::Existing) {
                 const bool importing = !config.importSource.empty();
@@ -759,9 +747,9 @@ bool runWizardWindow(WizardConfig &config)
                 }
             }
             else if (!activeRun && page == Page::Other) {
-                const bool newDestination = returnFromOptions == Page::Disc;
+                const bool newDestination = choosingInstallDestination;
                 if (newDestination)
-                    ImGui::TextDisabled("Step 3 of 3");
+                    ImGui::TextDisabled("Step 2 of 2");
                 ImGui::TextUnformatted(newDestination ? "Choose an installation folder" : "Choose an installed DW5E folder");
                 ImGui::TextWrapped("%s", newDestination
                     ? "Choose where DW5E should install its game files."
@@ -776,6 +764,7 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::SameLine();
                 if (folderButton("##BrowseInstallationFolder", "Browse for a folder"))
                     browseFolder();
+                ImGui::EndDisabled();
 
                 const auto checkFolder = [&] {
                     checkedFolder = folderInput;
@@ -817,6 +806,16 @@ bool runWizardWindow(WizardConfig &config)
                     ImGui::TextWrapped("This folder does not exist yet. DW5E will create it when you start installation.");
                 if (newDestination && folderHasInstallation)
                     ImGui::TextWrapped("DW5E is already installed here. You can use this copy without the ISO.");
+                if (newDestination && !folderHasInstallation) {
+                    ImGui::Spacing();
+                    ImGui::TextUnformatted("Saves and settings");
+                    Installation selected;
+                    std::string modeError;
+                    const auto defaultMode = !folderChoice.empty() &&
+                        loadInstallation(folderChoice, selected, modeError)
+                        ? selected.mode : SaveMode::Normal;
+                    chooseMode(defaultMode, folderChoice);
+                }
 
                 const auto chooseExisting = [&](const fs::path &existing) {
                     if (!selectDestination(existing))
@@ -827,6 +826,7 @@ bool runWizardWindow(WizardConfig &config)
                     page = config.manageOnly ? Page::Manage : Page::Existing;
                 };
                 if (!newDestination) {
+                    ImGui::BeginDisabled(destination.explicitOverride);
                     for (size_t i = 0; i < config.discovered.size(); ++i) {
                         if (config.discovered[i] == destination.destination && returnFromOptions == Page::Existing)
                             continue;
@@ -841,8 +841,8 @@ bool runWizardWindow(WizardConfig &config)
                         }
                         ImGui::PopID();
                     }
+                    ImGui::EndDisabled();
                 }
-                ImGui::EndDisabled();
                 const char *folderAction = newDestination
                     ? (folderHasInstallation ? "Use installed copy" : "Install & Play")
                     : "Use this folder";
@@ -897,7 +897,7 @@ bool runWizardWindow(WizardConfig &config)
                 }
 
                 if (!config.launcherDir.empty())
-                    ImGui::TextDisabled("Step 2 of 3");
+                    ImGui::TextDisabled("Step 1 of 2");
                 ImGui::TextUnformatted("Install from ISO");
                 ImGui::TextWrapped("Choose your legally owned European PAL disc image (.iso).");
                 ImGui::Spacing();
@@ -966,20 +966,21 @@ bool runWizardWindow(WizardConfig &config)
 
                 showError(destination.error);
                 showError(actionError);
+                if (!config.launcherDir.empty() && !destination.explicitOverride &&
+                    link("Find an existing installation..."))
+                    openOptions();
                 ImGui::Spacing();
 
                 const bool chooseFolder = !config.launcherDir.empty();
                 const bool canStart = isoValid && currentIso == isoPathBuf && !hasDisc() &&
                     (chooseFolder || (destination.error.empty() && !destination.destination.empty()));
-                const auto actions = footer(chooseFolder ? "Back" : nullptr,
+                const auto actions = footer(nullptr,
                                             preparing ? "Preparing..." : chooseFolder ? "Continue" : "Install & Play",
                                             canStart);
-                if (actions.back)
-                    page = Page::Saves;
                 if (actions.primary) {
                     config.base.discIso = pathFromText(validatedIsoPath);
                     if (chooseFolder)
-                        openOptions();
+                        openOptions(true);
                     else
                         beginPreparation();
                 }

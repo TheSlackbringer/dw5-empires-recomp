@@ -50,10 +50,12 @@ Your files
   Installation files stay in game-files beside DW5E.exe by default. This folder holds
   extracted game files, the compiled game, generated code, cache, logs, tools and sources.
   Setup shows the destination; use Choose folder for another location.
-  A custom choice can be remembered in dw5e-install.json beside the launcher.
+  A non-portable custom choice can be remembered in dw5e-install.json beside the launcher.
 
 Saves and settings
-  First setup offers On this PC (recommended) or With the game (portable).
+  Select the ISO first. The installation folder page then offers On this PC
+  (recommended) or With the game (portable) for saves and settings. Portable
+  records its mode in install.json inside the game folder.
   On this PC uses %LOCALAPPDATA%/DW5E/user-data for saves/achievements and
   %LOCALAPPDATA%/DW5E/config for settings and a small installation-location record.
   Portable uses game-files/user-data for both. The mode is remembered inside the
@@ -119,10 +121,12 @@ Your files
   outside its temporary mount. Use Choose folder for another destination.
   game-files contains extracted game data, build, generated code, cache, logs and the
   writable builder (sources/tools copied from the AppImage). A custom choice can be
-  remembered in dw5e-install.json beside the launcher.
+  remembered in dw5e-install.json beside the launcher for non-portable installs.
 
 Saves and settings
-  First setup offers On this PC (recommended) or With the game (portable).
+  Select the ISO first. The installation folder page then offers On this PC
+  (recommended) or With the game (portable) for saves and settings. Portable
+  records its mode in install.json inside the game folder.
   On this PC uses $XDG_DATA_HOME/dw5e/user-data (default ~/.local/share/dw5e/user-data)
   and $XDG_CONFIG_HOME/dw5e/config (default ~/.config/dw5e/config).
   Portable uses game-files/user-data for both saves/achievements and settings.
