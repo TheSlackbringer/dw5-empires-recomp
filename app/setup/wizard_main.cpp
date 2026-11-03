@@ -147,7 +147,7 @@ int main(int argc, char **argv)
             else destinationError.clear();
         }
         else if (args.importSource.empty() && !explicitDestination && !fs::exists(launcher / "dw5e-install.json") &&
-                 installState(data) != InstallState::Installed) {
+                 installState(data) != InstallState::Installed && !fs::is_regular_file(data / "install.json")) {
             fs::path preferred;
             if(!discoverInstallations(launcher, discovered, resolveError, &preferred)) destinationError=resolveError;
             else if(!preferred.empty()) { data=preferred; destinationError.clear(); }

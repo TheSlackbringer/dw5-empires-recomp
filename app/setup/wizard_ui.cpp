@@ -9,7 +9,6 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <thread>
 
 #ifdef _WIN32
@@ -39,9 +38,15 @@ struct Preparation {
     std::atomic<bool> done{false};
     bool ok=false;
     std::thread worker;
-    Preparation(const WizardConfig &source,const InstallFolderSelection &folder):config(source),selection(folder) {
-        worker=std::thread([this] {
-            try { ok=prepareWizardSelection(config,selection); }
+    Preparation(const WizardConfig &source, const InstallFolderSelection &folder, bool uninstall)
+        : config(source), selection(folder) {
+        worker=std::thread([this, uninstall] {
+            try {
+                ok = uninstall
+                    ? uninstallGameFiles(selection.destination, selection.launcher,
+                                         !selection.explicitOverride, selection.error)
+                    : prepareWizardSelection(config, selection);
+            }
             catch(const std::exception &error) { selection.error=error.what(); }
             done.store(true,std::memory_order_release);
         });
@@ -239,15 +244,18 @@ bool runWizardWindow(WizardConfig &config)
     auto existingDialog = std::make_shared<DialogState>();
     char destinationBuf[32768] = {};
     std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
-    enum class Page { Saves, Disc, Existing, Other, Manage, Copied, Saved, PreparationFailed };
+    enum class Page { Saves, Disc, Existing, Other, Manage, Uninstall, Uninstalled, Copied, Saved, PreparationFailed };
     const auto hasDisc = [&] { return installState(destination.destination) == InstallState::Installed; };
+    Installation initialInstallation;
+    std::string initialMetadataError;
+    const bool savedMode = !destination.destination.empty() &&
+        loadInstallation(destination.destination, initialInstallation, initialMetadataError) && initialInstallation.recorded;
     Page page = config.manageOnly ? Page::Manage
               : !config.importSource.empty() ? Page::Saves
               : hasDisc() ? Page::Existing
               : !config.discovered.empty() || !destination.error.empty() ? Page::Other
-              : config.modeChosen || config.launcherDir.empty() ? Page::Disc : Page::Saves;
+              : savedMode || config.modeChosen || config.launcherDir.empty() ? Page::Disc : Page::Saves;
     Page returnFromOptions = page;
-    std::optional<InstallFolderSelection> beforeFreshSetup;
     const auto openOptions = [&] {
         returnFromOptions = page;
         page = Page::Other;
@@ -274,7 +282,10 @@ bool runWizardWindow(WizardConfig &config)
     std::unique_ptr<SetupRun> activeRun;
     std::unique_ptr<Preparation> preparation;
     bool closeAfterPreparation=false;
-    const auto beginPreparation=[&] { preparation=std::make_unique<Preparation>(config,destination);destination.frozen=true; };
+    const auto beginPreparation = [&](bool uninstall = false) {
+        preparation = std::make_unique<Preparation>(config, destination, uninstall);
+        destination.frozen = true;
+    };
     bool quit = false;
     bool succeeded = false;
 
@@ -317,7 +328,6 @@ bool runWizardWindow(WizardConfig &config)
             if (folderDialog->hasResult) {
                 if (!activeRun && !preparation && selectDestination(pathFromText(folderDialog->selectedFile))) {
                     if (hasDisc()) {
-                        beforeFreshSetup.reset();
                         config.modeChosen = false;
                         config.importSource.clear();
                         page = Page::Existing;
@@ -337,7 +347,6 @@ bool runWizardWindow(WizardConfig &config)
                     if (existing.empty())
                         actionError = "Choose a folder containing a verified DW5E installation.";
                     else if (selectDestination(existing)) {
-                        beforeFreshSetup.reset();
                         config.modeChosen = false;
                         config.importSource.clear();
                         config.conflict = SaveConflict::Ask;
@@ -352,7 +361,12 @@ bool runWizardWindow(WizardConfig &config)
             config = std::move(preparation->config);
             destination = std::move(preparation->selection);
             preparation.reset();
-            if (closeAfterPreparation)
+            if (ok && page == Page::Uninstall) {
+                config.manageOnly = true;
+                succeeded = true;
+                page = Page::Uninstalled;
+                quit = closeAfterPreparation;
+            } else if (closeAfterPreparation)
                 quit = true;
             else if (!ok) {
                 actionError = std::move(destination.error);
@@ -432,7 +446,7 @@ bool runWizardWindow(WizardConfig &config)
             struct FooterResult { bool back = false; bool primary = false; };
             bool footerDrawn = false;
             const auto footer = [&](const char *back = nullptr, const char *primary = nullptr,
-                                    bool primaryEnabled = true) {
+                                    bool primaryEnabled = true, bool destructive = false) {
                 ImGui::EndDisabled();
                 ImGui::EndChild();
                 footerDrawn = true;
@@ -452,8 +466,10 @@ bool runWizardWindow(WizardConfig &config)
                 if (primary) {
                     if (back)
                         ImGui::SameLine();
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.43f, 0.66f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.52f, 0.76f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Button, destructive
+                        ? ImVec4(0.62f, 0.21f, 0.24f, 1.0f) : ImVec4(0.22f, 0.43f, 0.66f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, destructive
+                        ? ImVec4(0.74f, 0.26f, 0.30f, 1.0f) : ImVec4(0.28f, 0.52f, 0.76f, 1.0f));
                     ImGui::BeginDisabled(preparing || !primaryEnabled);
                     result.primary = ImGui::Button(primary, ImVec2(width, buttonHeight));
                     ImGui::EndDisabled();
@@ -540,6 +556,24 @@ bool runWizardWindow(WizardConfig &config)
                 if (footer("Back").back)
                     page = pageBeforeFailure;
             }
+            else if (!activeRun && page == Page::Uninstall) {
+                ImGui::TextUnformatted("Uninstall game files?");
+                ImGui::TextWrapped("%s", pathText(destination.destination).c_str());
+                ImGui::TextWrapped("This removes the extracted game files, generated code and compiled build.");
+                ImGui::TextWrapped("The launcher, your saves and settings will stay. You will need the ISO to reinstall this copy.");
+                const auto actions = footer("Back", preparing ? "Removing..." : "Uninstall game files",
+                                            destination.error.empty(), true);
+                if (actions.back)
+                    page = Page::Manage;
+                if (actions.primary)
+                    beginPreparation(true);
+            }
+            else if (!activeRun && page == Page::Uninstalled) {
+                ImGui::TextUnformatted("Game files removed");
+                ImGui::TextWrapped("Your saves and settings are still in place. Open the launcher again to reinstall from an ISO.");
+                if (footer(nullptr, "Done").primary)
+                    quit = true;
+            }
             else if (!activeRun && (page == Page::Copied || page == Page::Saved)) {
                 if (page == Page::Copied) {
                     ImGui::TextUnformatted("Installation copied");
@@ -591,6 +625,11 @@ bool runWizardWindow(WizardConfig &config)
                 if (!canManage && !destination.explicitOverride &&
                     ImGui::SmallButton("Choose installation..."))
                     openOptions();
+                if (canUninstallGameFiles(destination.destination)) {
+                    ImGui::Separator();
+                    if (link("Uninstall game files..."))
+                        page = Page::Uninstall;
+                }
                 const auto actions = footer(returnToExisting ? "Back" : nullptr,
                                             preparing ? "Saving..." : "Save change",
                                             canManage && config.modeChosen && config.desiredMode != current.mode);
@@ -609,15 +648,20 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::TextDisabled(config.importSource.empty() ? "Step 1 of 2" : "Copy installation");
                 ImGui::TextUnformatted(copyFromManagement ? "Where should the copy keep its saves?"
                                                          : "Where should saves and settings be stored?");
-                chooseMode(SaveMode::Normal);
+                Installation selectedMode;
+                std::string modeError;
+                const auto defaultMode = config.importSource.empty() &&
+                    loadInstallation(destination.destination, selectedMode, modeError)
+                    ? selectedMode.mode : SaveMode::Normal;
+                chooseMode(defaultMode);
                 if (copyFromManagement)
                     ImGui::TextWrapped("Choose Portable if you want saves and settings to travel with the copy.");
                 showError(actionError);
                 ImGui::Spacing();
-                if (!beforeFreshSetup && !destination.explicitOverride &&
-                    config.importSource.empty() && link("Other options"))
+                if (!destination.explicitOverride && config.importSource.empty() &&
+                    link("Find an existing installation..."))
                     openOptions();
-                const auto actions = footer(copyFromManagement || beforeFreshSetup ? "Back" : nullptr,
+                const auto actions = footer(copyFromManagement ? "Back" : nullptr,
                                             "Continue");
                 if (actions.back) {
                     if (copyFromManagement && selectDestination(config.importSource)) {
@@ -626,17 +670,9 @@ bool runWizardWindow(WizardConfig &config)
                         config.conflict = SaveConflict::Ask;
                         copyFromManagement = false;
                         page = Page::Manage;
-                    } else if (beforeFreshSetup) {
-                        destination = std::move(*beforeFreshSetup);
-                        beforeFreshSetup.reset();
-                        std::snprintf(destinationBuf, sizeof(destinationBuf), "%s",
-                                      pathText(destination.destination).c_str());
-                        actionError.clear();
-                        page = Page::Other;
                     }
                 }
                 if (actions.primary) {
-                    config.modeChosen = true;
                     page = config.importSource.empty() ? Page::Disc : Page::Existing;
                 }
             }
@@ -680,16 +716,13 @@ bool runWizardWindow(WizardConfig &config)
                     }
                     if (!destination.explicitOverride) {
                         ImGui::SameLine();
-                        if (link("Other options"))
+                        if (link("Choose another installed folder..."))
                             openOptions();
                     }
                 }
-                const char *primary = copyFromManagement ? "Copy installation"
-                                      : importing ? "Copy & Play" : "Use this installation";
-                if (!importing && !saveConfirmation.empty()) {
-                    primary = wizardBuildIsCurrent(config.base, destination.destination, config.releaseId)
+                const char *primary = copyFromManagement ? "Copy installation" : importing ? "Copy & Play" :
+                    wizardBuildIsCurrent(config.base, destination.destination, config.releaseId)
                         ? "Play" : "Update & Play";
-                }
                 if (preparing)
                     primary = importing ? "Copying..." : "Preparing...";
                 const auto actions = footer(importing ? "Back" : nullptr, primary, destination.error.empty());
@@ -701,7 +734,7 @@ bool runWizardWindow(WizardConfig &config)
                 }
             }
             else if (!activeRun && page == Page::Other) {
-                ImGui::TextUnformatted(config.manageOnly ? "Choose an installation to manage" : "Installation options");
+                ImGui::TextUnformatted(config.manageOnly ? "Choose an installation to manage" : "Find an existing installation");
                 showError(destination.error);
                 showError(actionError);
                 ImGui::BeginDisabled(destination.explicitOverride);
@@ -711,7 +744,6 @@ bool runWizardWindow(WizardConfig &config)
                     ImGui::PushID(static_cast<int>(i));
                     ImGui::TextWrapped("%s", pathText(config.discovered[i]).c_str());
                     if (ImGui::SmallButton("Use this installation") && selectDestination(config.discovered[i])) {
-                        beforeFreshSetup.reset();
                         config.importSource.clear();
                         config.modeChosen = false;
                         config.conflict = SaveConflict::Ask;
@@ -725,21 +757,6 @@ bool runWizardWindow(WizardConfig &config)
                 const ImVec2 optionSize(optionWidth, buttonHeight);
                 if (ImGui::Button("Choose an installed DW5E folder...", optionSize))
                     browseExisting();
-                if (!config.manageOnly) {
-                    const auto defaultFolder = config.launcherDir / "game-files";
-                    if (ImGui::Button("Start a new installation", optionSize)) {
-                        beforeFreshSetup = destination;
-                        config.importSource.clear();
-                        config.modeChosen = false;
-                        config.conflict = SaveConflict::Ask;
-                        if (installState(defaultFolder) == InstallState::Installed) {
-                            actionError = "Choose a separate folder for a new installation.";
-                            browseDestination();
-                        } else if (selectDestination(defaultFolder)) {
-                            page = Page::Saves;
-                        }
-                    }
-                }
                 ImGui::EndDisabled();
                 ImGui::Spacing();
                 if (footer(returnFromOptions != Page::Other ? "Back" : nullptr).back)
@@ -779,7 +796,7 @@ bool runWizardWindow(WizardConfig &config)
 
                 if (!config.launcherDir.empty())
                     ImGui::TextDisabled("Step 2 of 2");
-                ImGui::TextUnformatted("Select your disc image");
+                ImGui::TextUnformatted("Install from ISO");
                 ImGui::TextWrapped("Choose your legally owned European PAL disc image (.iso).");
                 ImGui::Spacing();
 

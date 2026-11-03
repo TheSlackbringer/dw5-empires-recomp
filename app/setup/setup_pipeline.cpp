@@ -1,6 +1,7 @@
 #include "setup_pipeline.h"
 #include "codegen.h"
 #include "install_state.h"
+#include "installation.h"
 #include "install_location.h"
 #include "xdvdfs.h"
 
@@ -156,6 +157,11 @@ void SetupRun::run()
     std::error_code ec;
     std::string destinationError;
     if (!validateInstallDirectory(dataDir, destinationError)) {
+        fail(destinationError); return;
+    }
+    InstallationLock installationLock;
+    if (!installationLock.acquire(dataDir, destinationError) ||
+        installationGameRunning(dataDir, destinationError)) {
         fail(destinationError); return;
     }
     fs::create_directories(logDir, ec);

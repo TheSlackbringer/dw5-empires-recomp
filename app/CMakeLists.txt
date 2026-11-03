@@ -153,7 +153,7 @@ add_executable(dw5e_setup_reliability_test
     tests/setup_reliability_test.cpp
     setup/xdvdfs.cpp setup/install_state.cpp
     setup/install_location.cpp setup/setup_layout.cpp
-    setup/build_game.cpp setup/run_process.cpp setup/codegen.cpp setup/setup_pipeline.cpp
+    setup/build_game.cpp setup/run_process.cpp setup/codegen.cpp setup/setup_pipeline.cpp setup/installation.cpp
 )
 target_include_directories(dw5e_setup_reliability_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(dw5e_setup_reliability_test PRIVATE Threads::Threads)

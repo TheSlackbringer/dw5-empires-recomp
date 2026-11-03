@@ -148,6 +148,50 @@ int main()
     check(read(legacy / "0000000000000001/4B4F07D3/save") == "legacy progress" &&
               read(legacy / "build/dw5e.toml") == "legacy settings",
           "legacy originals remain unchanged");
+    put(imported.root / "launcher/DW5E.exe", "packaged launcher");
+    put(imported.root / "tools/keep", "packaged tools");
+    put(imported.root / "builder/app/keep", "generated builder");
+    put(imported.root / "generated/keep", "generated code");
+    put(imported.root / "cache/snapshots/keep", "player snapshot");
+    const auto importMetadata = read(imported.root / "install.json");
+    const auto machineIndex = read(normalConfigDirectory() / "installations.json");
+    {
+        InstallationLock held;
+        check(held.acquire(imported.root, error), "lock installation for simulated setup");
+        bool blocked = false;
+        std::thread attempt([&] {
+            std::string lockError;
+            blocked = !uninstallGameFiles(imported.root, imported.root.parent_path(), true, lockError);
+        });
+        attempt.join();
+        check(blocked && fs::exists(imported.root / "game/files/default.xex"),
+              "uninstall cannot remove files while another operation holds the lock");
+    }
+    check(uninstallGameFiles(imported.root, imported.root.parent_path(), true, error),
+          "uninstall verified portable game files");
+    check(!fs::exists(imported.root / "game/files") &&
+              !fs::exists(imported.root / "game/installed.txt") &&
+              !fs::exists(imported.root / "build/_deps/keep") &&
+              !fs::exists(imported.root / "builder") && !fs::exists(imported.root / "generated"),
+          "uninstall removes extracted and built files");
+    check(read(imported.root / "install.json") == importMetadata &&
+              read(imported.userData / "0000000000000001/4B4F07D3/save") == "legacy progress" &&
+              read(imported.configDir / "dw5e.toml") == "legacy settings" &&
+              read(imported.root / "launcher/DW5E.exe") == "packaged launcher" &&
+              read(imported.root / "tools/keep") == "packaged tools" &&
+              read(imported.root / "cache/snapshots/keep") == "player snapshot" &&
+              read(normalConfigDirectory() / "installations.json") == machineIndex,
+          "uninstall preserves portable progress, mode, launcher, tools and snapshots");
+    check(uninstallGameFiles(legacy, newZip, true, error) &&
+              loadInstallation(legacy, restarted, error) && restarted.mode == SaveMode::Legacy &&
+              read(legacy / "build/dw5e.toml") == "legacy settings" &&
+              read(legacy / "0000000000000001/4B4F07D3/save") == "legacy progress" &&
+              !fs::exists(legacy / "build/_deps/keep"),
+          "legacy uninstall keeps settings in build and saves in place");
+    put(scratch / "unverified/build/keep", "unrelated");
+    check(!uninstallGameFiles(scratch / "unverified", newZip, true, error) &&
+              read(scratch / "unverified/build/keep") == "unrelated",
+          "uninstall refuses an unverified folder");
     env("LOCALAPPDATA", {});
     env("HOME", {});
     env("XDG_CONFIG_HOME", {});

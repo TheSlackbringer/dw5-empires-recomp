@@ -51,4 +51,7 @@ bool switchSaveMode(Installation &installation, SaveMode mode, SaveConflict conf
 bool importInstallation(const std::filesystem::path &source, Installation &destination, SaveConflict conflict,
                         std::string &error);
 bool installationGameRunning(const std::filesystem::path &root, std::string &error);
+bool canUninstallGameFiles(const std::filesystem::path &root);
+bool uninstallGameFiles(const std::filesystem::path &root, const std::filesystem::path &launcher,
+                        bool rememberForReinstall, std::string &error);
 } // namespace dw5e::setup

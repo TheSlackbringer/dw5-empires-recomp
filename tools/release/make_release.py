@@ -76,7 +76,8 @@ Updating and existing installations
 
 Migration from an older release
   Older releases may have flat installation folders or use %LOCALAPPDATA%/DW5E.
-  For a normal update, Use this installation keeps playing from the current folder.
+  Update & Play reuses the current folder for an ordinary update.
+  Manage installation offers Uninstall game files. Saves, settings and launcher stay.
   For another drive or PC, open Manage installation and choose Copy installation
   beside this launcher. It shows the destination and keeps the original as a backup.
   Choose Portable to keep saves and settings with the copy. No ISO is needed.
@@ -143,7 +144,8 @@ Updating and existing installations
 
 Migration from an older release
   Older releases may use a flat directory or ~/.local/share/dw5e.
-  For a normal update, Use this installation keeps playing from the current folder.
+  Update & Play reuses the current folder for an ordinary update.
+  Manage installation offers Uninstall game files. Saves, settings and AppImage stay.
   For another drive or PC, open Manage installation and choose Copy installation
   beside this AppImage. It shows the destination and keeps the original as a backup.
   Choose Portable to keep saves and settings with the copy. No ISO is needed.
