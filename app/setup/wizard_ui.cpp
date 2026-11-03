@@ -422,13 +422,14 @@ bool runWizardWindow(WizardConfig &config)
             const float gap = ImGui::GetStyle().ItemSpacing.x;
             const float footerHeight = buttonHeight + 2 * ImGui::GetStyle().ItemSpacing.y + 1;
             const float bodyHeight = ImGui::GetContentRegionAvail().y - footerHeight;
-            ImGui::PushID(preparation ? -1 : activeRun ? -2 : static_cast<int>(page));
+            const bool savingInPlace = preparation && page == Page::Manage;
+            ImGui::PushID(preparation && !savingInPlace ? -1 : activeRun ? -2 : static_cast<int>(page));
             ImGui::BeginChild("PageBody", ImVec2(0, bodyHeight));
 
             struct FooterResult { bool back = false; bool primary = false; };
             bool footerDrawn = false;
             const auto footer = [&](const char *back = nullptr, const char *primary = nullptr,
-                                    bool primaryEnabled = true) {
+                                    bool primaryEnabled = true, bool backEnabled = true) {
                 ImGui::EndChild();
                 footerDrawn = true;
                 ImGui::Separator();
@@ -439,8 +440,11 @@ bool runWizardWindow(WizardConfig &config)
                 const float total = paired ? 2 * width + gap : width;
                 if (total > 0 && available > total)
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - total);
-                if (back)
+                if (back) {
+                    ImGui::BeginDisabled(!backEnabled);
                     result.back = ImGui::Button(back, ImVec2(width, buttonHeight));
+                    ImGui::EndDisabled();
+                }
                 if (primary) {
                     if (back)
                         ImGui::SameLine();
@@ -522,7 +526,7 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::TextWrapped("Setup Error: %s", config.layoutError.c_str());
                 ImGui::PopStyleColor();
             }
-            else if(preparation) {
+            else if (preparation && !savingInPlace) {
                 ImGui::TextWrapped("Preparing the installation and verifying file copies...");
                 ImGui::TextWrapped("Original saves are retained. The destination is locked until this finishes.");
                 if(closeAfterPreparation) ImGui::TextWrapped("Closing after the current safe copy finishes.");
@@ -557,6 +561,7 @@ bool runWizardWindow(WizardConfig &config)
                 const bool loaded = destination.error.empty() &&
                                     loadInstallation(destination.destination, current, metadataError);
                 const bool canManage = loaded && hasDisc();
+                ImGui::BeginDisabled(savingInPlace);
                 if (canManage) {
                     ImGui::TextWrapped("Current saves: %s", pathText(current.userData).c_str());
                     chooseMode(current.mode);
@@ -588,8 +593,14 @@ bool runWizardWindow(WizardConfig &config)
                 if (!canManage && !destination.explicitOverride &&
                     ImGui::SmallButton("Choose installation..."))
                     openOptions();
-                const auto actions = footer(returnToExisting ? "Back" : nullptr, "Save change",
-                                            canManage && config.modeChosen && config.desiredMode != current.mode);
+                ImGui::EndDisabled();
+                if (savingInPlace && closeAfterPreparation)
+                    ImGui::TextWrapped("Closing after the current save finishes.");
+                const auto actions = footer(returnToExisting ? "Back" : nullptr,
+                                            savingInPlace ? "Saving..." : "Save change",
+                                            !savingInPlace && canManage && config.modeChosen &&
+                                                config.desiredMode != current.mode,
+                                            !savingInPlace);
                 if (actions.back) {
                     config.manageOnly = false;
                     config.modeChosen = false;
