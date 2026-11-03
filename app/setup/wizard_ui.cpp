@@ -422,14 +422,18 @@ bool runWizardWindow(WizardConfig &config)
             const float gap = ImGui::GetStyle().ItemSpacing.x;
             const float footerHeight = buttonHeight + 2 * ImGui::GetStyle().ItemSpacing.y + 1;
             const float bodyHeight = ImGui::GetContentRegionAvail().y - footerHeight;
-            const bool savingInPlace = preparation && page == Page::Manage;
-            ImGui::PushID(preparation && !savingInPlace ? -1 : activeRun ? -2 : static_cast<int>(page));
+            const bool preparing = bool(preparation);
+            ImGui::PushID(activeRun ? -2 : static_cast<int>(page));
             ImGui::BeginChild("PageBody", ImVec2(0, bodyHeight));
+            if (preparing && closeAfterPreparation)
+                ImGui::TextWrapped("Closing when the current operation finishes.");
+            ImGui::BeginDisabled(preparing);
 
             struct FooterResult { bool back = false; bool primary = false; };
             bool footerDrawn = false;
             const auto footer = [&](const char *back = nullptr, const char *primary = nullptr,
-                                    bool primaryEnabled = true, bool backEnabled = true) {
+                                    bool primaryEnabled = true) {
+                ImGui::EndDisabled();
                 ImGui::EndChild();
                 footerDrawn = true;
                 ImGui::Separator();
@@ -441,7 +445,7 @@ bool runWizardWindow(WizardConfig &config)
                 if (total > 0 && available > total)
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - total);
                 if (back) {
-                    ImGui::BeginDisabled(!backEnabled);
+                    ImGui::BeginDisabled(preparing);
                     result.back = ImGui::Button(back, ImVec2(width, buttonHeight));
                     ImGui::EndDisabled();
                 }
@@ -450,7 +454,7 @@ bool runWizardWindow(WizardConfig &config)
                         ImGui::SameLine();
                     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.43f, 0.66f, 1.0f));
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.52f, 0.76f, 1.0f));
-                    ImGui::BeginDisabled(!primaryEnabled);
+                    ImGui::BeginDisabled(preparing || !primaryEnabled);
                     result.primary = ImGui::Button(primary, ImVec2(width, buttonHeight));
                     ImGui::EndDisabled();
                     ImGui::PopStyleColor(2);
@@ -526,11 +530,6 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::TextWrapped("Setup Error: %s", config.layoutError.c_str());
                 ImGui::PopStyleColor();
             }
-            else if (preparation && !savingInPlace) {
-                ImGui::TextWrapped("Preparing the installation and verifying file copies...");
-                ImGui::TextWrapped("Original saves are retained. The destination is locked until this finishes.");
-                if(closeAfterPreparation) ImGui::TextWrapped("Closing after the current safe copy finishes.");
-            }
             else if (!activeRun && page == Page::PreparationFailed) {
                 ImGui::TextUnformatted(pageBeforeFailure == Page::Manage
                     ? "Could not save the new location" : "Setup could not continue");
@@ -561,7 +560,6 @@ bool runWizardWindow(WizardConfig &config)
                 const bool loaded = destination.error.empty() &&
                                     loadInstallation(destination.destination, current, metadataError);
                 const bool canManage = loaded && hasDisc();
-                ImGui::BeginDisabled(savingInPlace);
                 if (canManage) {
                     ImGui::TextWrapped("Current saves: %s", pathText(current.userData).c_str());
                     chooseMode(current.mode);
@@ -593,14 +591,9 @@ bool runWizardWindow(WizardConfig &config)
                 if (!canManage && !destination.explicitOverride &&
                     ImGui::SmallButton("Choose installation..."))
                     openOptions();
-                ImGui::EndDisabled();
-                if (savingInPlace && closeAfterPreparation)
-                    ImGui::TextWrapped("Closing after the current save finishes.");
                 const auto actions = footer(returnToExisting ? "Back" : nullptr,
-                                            savingInPlace ? "Saving..." : "Save change",
-                                            !savingInPlace && canManage && config.modeChosen &&
-                                                config.desiredMode != current.mode,
-                                            !savingInPlace);
+                                            preparing ? "Saving..." : "Save change",
+                                            canManage && config.modeChosen && config.desiredMode != current.mode);
                 if (actions.back) {
                     config.manageOnly = false;
                     config.modeChosen = false;
@@ -697,6 +690,8 @@ bool runWizardWindow(WizardConfig &config)
                     primary = wizardBuildIsCurrent(config.base, destination.destination, config.releaseId)
                         ? "Play" : "Update & Play";
                 }
+                if (preparing)
+                    primary = importing ? "Copying..." : "Preparing...";
                 const auto actions = footer(importing ? "Back" : nullptr, primary, destination.error.empty());
                 if (actions.back)
                     page = Page::Saves;
@@ -858,7 +853,7 @@ bool runWizardWindow(WizardConfig &config)
                 const bool canStart = isoValid && currentIso == isoPathBuf && destination.error.empty() &&
                                       !destination.destination.empty() && !hasDisc();
                 const auto actions = footer(config.launcherDir.empty() ? nullptr : "Back",
-                                            "Install & Play", canStart);
+                                            preparing ? "Preparing..." : "Install & Play", canStart);
                 if (actions.back)
                     page = Page::Saves;
                 if (actions.primary) {
