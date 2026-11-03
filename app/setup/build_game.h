@@ -34,6 +34,9 @@ bool resetBuildIfMoved(const std::filesystem::path &buildDir, const std::filesys
 // Parses "[done/total]" progress strings from Ninja build output logs.
 BuildProgress parseNinjaProgress(const std::string &logText);
 
+// Returns the newest counter in logText, or previous when the log's tail holds none.
+BuildProgress latestNinjaProgress(const BuildProgress &previous, const std::string &logText);
+
 // Invokes CMake configure and build for target dw5e. Progress callback receives real-time progress.
 bool buildGame(const std::filesystem::path &root,
                const std::filesystem::path &buildDir,

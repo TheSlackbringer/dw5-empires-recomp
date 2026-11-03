@@ -998,15 +998,12 @@ bool runWizardWindow(WizardConfig &config)
                 SetupStatus st = activeRun->status();
 
                 ImGui::Text("Phase: %s", stepName(st.step));
-                // Ninja's task count uses a different scale than the overall setup bar.
-                const char *detail = st.step == Step::Build && st.detail.starts_with("[")
-                    ? "Compiling..." : st.detail.c_str();
-                ImGui::TextWrapped("Current step: %s", detail);
+                ImGui::TextWrapped("Current step: %s", st.detail.c_str());
                 ImGui::Spacing();
 
                 const float progressVal = static_cast<float>(st.overall);
                 char overlay[64];
-                std::snprintf(overlay, sizeof(overlay), "%.0f%%", progressVal * 100.0f);
+                std::snprintf(overlay, sizeof(overlay), "%.0f%% overall", progressVal * 100.0f);
                 ImGui::ProgressBar(progressVal, ImVec2(-1, 26), overlay);
 
                 ImGui::Spacing();

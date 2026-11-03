@@ -32,18 +32,19 @@ const char *stepName(Step step)
 }
 
 namespace {
+// Coarse shares from a timed clean setup (issue 010); real times vary between PCs.
 double stepWeight(Step step)
 {
     switch (step)
     {
     case Step::Check:
-        return 0.05;
+        return 0.20;
     case Step::Extract:
-        return 0.15;
+        return 0.05;
     case Step::Generate:
-        return 0.15;
+        return 0.05;
     case Step::Build:
-        return 0.65;
+        return 0.70;
     case Step::Done:
         return 0.0;
     }
@@ -74,6 +75,24 @@ double overallProgress(const std::vector<Step> &plan, Step current, double fract
     }
 
     return std::clamp(completedWeight / totalWeight, 0.0, 1.0);
+}
+
+double buildStepFraction(const BuildProgress &progress)
+{
+    if (progress.phase != "build" || progress.total <= 0)
+        return 0.05;
+    return 0.10 + 0.90 * (static_cast<double>(progress.done) / static_cast<double>(progress.total));
+}
+
+std::string buildStepDetail(const BuildProgress &progress)
+{
+    if (progress.phase != "build")
+        return "Configuring CMake...";
+    if (progress.total <= 0)
+        return "Compiling C++...";
+    const int percent = (progress.done * 100 + progress.total / 2) / progress.total;
+    return "Compiling " + std::to_string(progress.done) + " of " + std::to_string(progress.total) + " (" +
+           std::to_string(percent) + "%)";
 }
 
 SetupRun::SetupRun(SetupOptions options)
@@ -325,14 +344,7 @@ void SetupRun::run()
 
         bool buildOk = buildGame(m_options.root, buildDir, m_options.tools, buildLog,
                                  [this](const BuildProgress &p) {
-                                     double f = 0.05;
-                                     std::string msg = p.phase == "configure" ? "Configuring CMake..." : "Compiling C++...";
-                                     if (p.phase == "build" && p.total > 0)
-                                     {
-                                         f = 0.10 + 0.88 * (static_cast<double>(p.done) / static_cast<double>(p.total));
-                                         msg = "[" + std::to_string(p.done) + "/" + std::to_string(p.total) + "] Compiling...";
-                                     }
-                                     setStep(Step::Build, f, msg);
+                                     setStep(Step::Build, buildStepFraction(p), buildStepDetail(p));
                                  },
                                  executable, err, &m_cancel, generatedDir);
 

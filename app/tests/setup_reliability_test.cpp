@@ -7,6 +7,7 @@
 #include "setup/xdvdfs.h"
 
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include <string>
 #include <thread>
 #include <chrono>
+#include <vector>
 
 #ifdef _WIN32
 #include <io.h>
@@ -39,6 +41,35 @@ static void check(bool ok, const char *name)
 {
     std::cout << (ok ? "PASS: " : "FAIL: ") << name << '\n';
     failures += !ok;
+}
+
+static void testSetupProgress()
+{
+    const auto near = [](double value, double expected) { return std::abs(value - expected) < 0.0005; };
+
+    // Compiler output longer than the parsed tail must not lose Ninja's counter.
+    const BuildProgress seen{809, 932, "build"};
+    const std::string warnings(5000, 'w');
+    const BuildProgress kept = latestNinjaProgress(seen, "[809/932] Building\n" + warnings);
+    check(kept.done == 809 && kept.total == 932, "compile counter survives long compiler output");
+    const BuildProgress next = latestNinjaProgress(seen, warnings + "\n[810/932] Building\n");
+    check(next.done == 810 && next.total == 932, "newer compile counter replaces the previous one");
+
+    // Step shares measured by a timed clean setup (issue 010).
+    const std::vector<Step> full = {Step::Check, Step::Extract, Step::Generate, Step::Build};
+    check(near(overallProgress(full, Step::Extract, 0.0), 0.20), "disc check takes 20% of a full setup");
+    check(near(overallProgress(full, Step::Generate, 0.0), 0.25), "extraction takes 5% of a full setup");
+    check(near(overallProgress(full, Step::Build, 0.0), 0.30), "translation takes 5% of a full setup");
+    check(near(overallProgress(full, Step::Build, 1.0), 1.0), "the build takes the remaining 70%");
+
+    const BuildProgress compile{269, 932, "build"};
+    check(near(buildStepFraction({0, 0, "configure"}), 0.05), "configuring reaches 5% of the build step");
+    check(near(buildStepFraction({932, 932, "build"}), 1.0), "the last compile task finishes the build step");
+    check(near(overallProgress(full, Step::Build, buildStepFraction(compile)), 0.5521),
+          "269 of 932 compile tasks is 55% of a full setup");
+
+    check(buildStepDetail(compile) == "Compiling 269 of 932 (29%)", "compile detail labels counter and its percentage");
+    check(buildStepDetail({0, 0, "configure"}) == "Configuring CMake...", "configure detail is unchanged");
 }
 
 int main(int argc, char **argv)
@@ -90,6 +121,8 @@ int main(int argc, char **argv)
             return 0;
         }
     }
+
+    testSetupProgress();
 
     const fs::path self = fs::absolute(argv[0]);
     const fs::path scratch = fs::temp_directory_path() /

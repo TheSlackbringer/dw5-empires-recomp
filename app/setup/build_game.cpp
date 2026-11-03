@@ -39,14 +39,15 @@ ProcessResult runWithProgress(const fs::path &program,
         finished = true;
     });
 
+    BuildProgress latest;
     while (!finished)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         if (progress)
         {
-            BuildProgress p = parseNinjaProgress(readText(logFile));
-            p.phase = phase;
-            progress(p);
+            latest = latestNinjaProgress(latest, readText(logFile));
+            latest.phase = phase;
+            progress(latest);
         }
     }
     worker.join();
@@ -181,6 +182,12 @@ BuildProgress parseNinjaProgress(const std::string &logText)
         p.total = std::stoi((*it)[2].str());
     }
     return p;
+}
+
+BuildProgress latestNinjaProgress(const BuildProgress &previous, const std::string &logText)
+{
+    const BuildProgress parsed = parseNinjaProgress(logText);
+    return parsed.total > 0 ? parsed : previous;
 }
 
 bool buildGame(const fs::path &root,

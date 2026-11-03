@@ -30,6 +30,10 @@ const char *stepName(Step step);
 // Calculates overall weighted progress (0.0 to 1.0) based on active steps in plan.
 double overallProgress(const std::vector<Step> &plan, Step current, double fraction);
 
+// Share of the Build step reached (0.0 to 1.0) and its "Current step" text.
+double buildStepFraction(const BuildProgress &progress);
+std::string buildStepDetail(const BuildProgress &progress);
+
 struct SetupOptions
 {
     std::filesystem::path root;
