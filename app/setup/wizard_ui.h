@@ -18,11 +18,13 @@ struct WizardConfig
     std::string destinationError;
     bool explicitDestination = false;
     std::string layoutError;
+    std::string releaseId;
     std::filesystem::path prefilledIso;
     bool discInstalled = false;
     bool closeWhenFinished = true;
     bool noWindow = false;
     bool manageOnly = false;
+    bool launchExistingBuild = false;
     bool modeChosen = false;
     SaveMode desiredMode = SaveMode::Normal;
     SaveConflict conflict = SaveConflict::Ask;
@@ -34,6 +36,8 @@ bool prepareWizardInstallation(WizardConfig &config, const std::filesystem::path
                                std::string &error);
 struct InstallFolderSelection;
 bool prepareWizardSelection(WizardConfig &config, InstallFolderSelection &selection);
+bool wizardBuildIsCurrent(const SetupOptions &options, const std::filesystem::path &destination,
+                          const std::string &release);
 
 // Runs setup in interactive GUI window (ImGui + SDL3).
 // Returns the final chosen destination in config.base, including after a GUI selection.

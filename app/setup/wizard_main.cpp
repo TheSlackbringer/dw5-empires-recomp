@@ -239,9 +239,10 @@ int main(int argc, char **argv)
         return bool(out.flush());
     };
 
+    options.rebuild = args.rebuild;
     // Fast-path: if game is already built for this release and disc is installed, boot immediately!
-    if (!release.empty() && layoutError.empty() && destinationError.empty() && !args.rebuild && !args.installOnly && !managing && !args.modeChosen && importSource.empty() &&
-        fs::exists(game) && firstLine(options.effectiveBuildDir() / "built-from.txt") == release && installed())
+    if (layoutError.empty() && destinationError.empty() && !args.installOnly && !managing &&
+        !args.modeChosen && importSource.empty() && wizardBuildIsCurrent(options, data, release))
     {
         if (args.noWindow)
         {
@@ -260,7 +261,6 @@ int main(int argc, char **argv)
 
     // Keep the package root in the idle/retry UI. Each SetupRun restores its
     // stable Linux builder before using it, even if player data was deleted.
-    options.rebuild = args.rebuild;
     if (!args.iso.empty())
         options.discIso = args.iso;
 
@@ -270,6 +270,7 @@ int main(int argc, char **argv)
     config.destinationError = destinationError;
     config.explicitDestination = explicitDestination;
     config.layoutError = layoutError;
+    config.releaseId = release;
     config.prefilledIso = args.iso;
     config.discInstalled = installed();
     config.noWindow = args.noWindow;
@@ -290,7 +291,7 @@ int main(int argc, char **argv)
         if(!loadInstallation(data,storage,destinationError) || !rememberNormalInstallation(storage,destinationError)) {
             std::cerr<<destinationError<<std::endl;return 1;
         }
-        if (!release.empty() && !markBuilt()) {
+        if (!release.empty() && !config.launchExistingBuild && !markBuilt()) {
             std::cerr << "Cannot finish build marker at " << pathText(options.effectiveBuildDir()) << std::endl;
             return 1;
         }

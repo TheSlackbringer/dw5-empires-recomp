@@ -1,9 +1,34 @@
 #include "wizard_ui.h"
 #include "install_state.h"
 #include "install_location.h"
+#include <fstream>
 
 namespace dw5e::setup
 {
+bool wizardBuildIsCurrent(const SetupOptions &options, const std::filesystem::path &destination,
+                          const std::string &release)
+{
+    if (release.empty() || options.rebuild || installState(destination) != InstallState::Installed)
+        return false;
+    SetupOptions selected = options;
+    selected.dataDir = destination;
+    const auto build = selected.effectiveBuildDir();
+#ifdef _WIN32
+    const auto executable = build / "dw5e.exe";
+#else
+    const auto executable = build / "dw5e";
+#endif
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(executable, ec))
+        return false;
+    std::ifstream marker(build / "built-from.txt");
+    std::string builtFrom;
+    std::getline(marker, builtFrom);
+    while (!builtFrom.empty() && (builtFrom.back() == '\r' || builtFrom.back() == ' '))
+        builtFrom.pop_back();
+    return builtFrom == release;
+}
+
 bool prepareWizardSelection(WizardConfig &config, InstallFolderSelection &selection)
 {
     if (config.importSource.empty())

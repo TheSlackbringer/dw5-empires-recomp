@@ -4,6 +4,7 @@
 #include "xdvdfs.h"
 
 #include <chrono>
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -237,7 +238,7 @@ bool runWizardWindow(WizardConfig &config)
     auto existingDialog = std::make_shared<DialogState>();
     char destinationBuf[32768] = {};
     std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
-    enum class Page { Saves, Disc, Existing, Other, Manage, Copied };
+    enum class Page { Saves, Disc, Existing, Other, Manage, Copied, Saved };
     const auto hasDisc = [&] { return installState(destination.destination) == InstallState::Installed; };
     Page page = config.manageOnly ? Page::Manage
               : !config.importSource.empty() ? Page::Saves
@@ -251,6 +252,7 @@ bool runWizardWindow(WizardConfig &config)
         page = Page::Other;
     };
     std::string actionError;
+    std::string saveConfirmation;
     bool returnToExisting = false;
     bool copyFromManagement = false;
 #ifdef _WIN32
@@ -262,6 +264,7 @@ bool runWizardWindow(WizardConfig &config)
         if (!destination.choose(path))
             return false;
         actionError.clear();
+        saveConfirmation.clear();
         std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
         return true;
     };
@@ -352,11 +355,30 @@ bool runWizardWindow(WizardConfig &config)
                 actionError = std::move(destination.error);
                 destination.error.clear();
             } else if (config.manageOnly) {
-                succeeded = true;
-                if (copyFromManagement)
+                if (copyFromManagement) {
+                    succeeded = true;
                     page = Page::Copied;
-                else
-                    quit = true;
+                } else {
+                    saveConfirmation = config.desiredMode == SaveMode::Portable
+                        ? "Save location updated. Saves and settings now stay with the game."
+                        : "Save location updated. Saves and settings now use your user profile.";
+                    config.modeChosen = false;
+                    config.conflict = SaveConflict::Ask;
+                    actionError.clear();
+                    if (returnToExisting) {
+                        config.manageOnly = false;
+                        returnToExisting = false;
+                        page = Page::Existing;
+                    } else {
+                        succeeded = true;
+                        page = Page::Saved;
+                    }
+                }
+            } else if (config.importSource.empty() && config.base.discIso.empty() &&
+                       wizardBuildIsCurrent(config.base, destination.destination, config.releaseId)) {
+                config.launchExistingBuild = true;
+                succeeded = true;
+                quit = true;
             } else {
                 config.importSource.clear();
                 actionError.clear();
@@ -395,21 +417,21 @@ bool runWizardWindow(WizardConfig &config)
                 footerDrawn = true;
                 ImGui::Separator();
                 FooterResult result;
-                const float backWidth = back ? 100.0f : 0.0f;
-                const float primaryWidth = primary ? 180.0f : 0.0f;
-                const float total = backWidth + primaryWidth + (back && primary ? gap : 0.0f);
                 const float available = ImGui::GetContentRegionAvail().x;
+                const bool paired = back && primary;
+                const float width = std::min(180.0f, paired ? (available - gap) / 2 : available);
+                const float total = paired ? 2 * width + gap : width;
                 if (total > 0 && available > total)
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - total);
                 if (back)
-                    result.back = ImGui::Button(back, ImVec2(backWidth, buttonHeight));
+                    result.back = ImGui::Button(back, ImVec2(width, buttonHeight));
                 if (primary) {
                     if (back)
                         ImGui::SameLine();
                     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.43f, 0.66f, 1.0f));
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.52f, 0.76f, 1.0f));
                     ImGui::BeginDisabled(!primaryEnabled);
-                    result.primary = ImGui::Button(primary, ImVec2(primaryWidth, buttonHeight));
+                    result.primary = ImGui::Button(primary, ImVec2(width, buttonHeight));
                     ImGui::EndDisabled();
                     ImGui::PopStyleColor(2);
                 }
@@ -489,10 +511,15 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::TextWrapped("Original saves are retained. The destination is locked until this finishes.");
                 if(closeAfterPreparation) ImGui::TextWrapped("Closing after the current safe copy finishes.");
             }
-            else if (!activeRun && page == Page::Copied) {
-                ImGui::TextUnformatted("Installation copied");
-                ImGui::TextWrapped("%s", pathText(destination.destination).c_str());
-                ImGui::TextWrapped("Open this launcher to play from the new copy. Your original installation is still in place.");
+            else if (!activeRun && (page == Page::Copied || page == Page::Saved)) {
+                if (page == Page::Copied) {
+                    ImGui::TextUnformatted("Installation copied");
+                    ImGui::TextWrapped("%s", pathText(destination.destination).c_str());
+                    ImGui::TextWrapped("Open this launcher to play from the new copy. Your original installation is still in place.");
+                } else {
+                    ImGui::TextWrapped("%s", saveConfirmation.c_str());
+                    ImGui::TextWrapped("Open the launcher when you are ready to update or play.");
+                }
                 if (footer(nullptr, "Done").primary)
                     quit = true;
             }
@@ -506,7 +533,7 @@ bool runWizardWindow(WizardConfig &config)
                 const bool canManage = loaded && hasDisc();
                 if (canManage) {
                     ImGui::TextWrapped("Current saves: %s", pathText(current.userData).c_str());
-                    chooseMode(current.mode == SaveMode::Portable ? SaveMode::Portable : SaveMode::Normal);
+                    chooseMode(current.mode);
                     chooseConflict();
                     ImGui::TextWrapped("Close the game before switching. Your original saves are kept.");
                 } else if (loaded) {
@@ -521,7 +548,7 @@ bool runWizardWindow(WizardConfig &config)
                     installState(copyDestination) != InstallState::Installed) {
                     ImGui::Separator();
                     ImGui::TextWrapped("Taking DW5E to another drive or PC? Make a second copy of this installation.");
-                    if (ImGui::Button(copyLabel)) {
+                    if (ImGui::Button(copyLabel, ImVec2(0, buttonHeight))) {
                         const auto source = destination.destination;
                         if (selectDestination(copyDestination)) {
                             config.importSource = source;
@@ -592,6 +619,8 @@ bool runWizardWindow(WizardConfig &config)
                     ImGui::TextWrapped("This creates a second copy. Your current installation stays where it is. No ISO needed.");
                     chooseConflict();
                 } else {
+                    if (!saveConfirmation.empty())
+                        ImGui::TextWrapped("%s", saveConfirmation.c_str());
                     ImGui::TextWrapped("Update if needed and play from this folder. No ISO needed.");
                     const auto path = pathText(destination.destination);
                     const ImVec2 padding(12, 9);
@@ -627,6 +656,10 @@ bool runWizardWindow(WizardConfig &config)
                 }
                 const char *primary = copyFromManagement ? "Copy installation"
                                       : importing ? "Copy & Play" : "Use this installation";
+                if (!importing && !saveConfirmation.empty()) {
+                    primary = wizardBuildIsCurrent(config.base, destination.destination, config.releaseId)
+                        ? "Play" : "Update & Play";
+                }
                 const auto actions = footer(importing ? "Back" : nullptr, primary, destination.error.empty());
                 if (actions.back)
                     page = Page::Saves;
@@ -654,7 +687,8 @@ bool runWizardWindow(WizardConfig &config)
                     }
                     ImGui::PopID();
                 }
-                if (ImGui::Button("Browse for existing installation..."))
+                ImGui::TextWrapped("Already installed DW5E somewhere else? Select its installation folder. No ISO needed.");
+                if (ImGui::Button("Choose an installed DW5E folder...", ImVec2(0, buttonHeight)))
                     browseExisting();
                 if (!config.manageOnly) {
                     const auto defaultFolder = config.launcherDir / "game-files";
