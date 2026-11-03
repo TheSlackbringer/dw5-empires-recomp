@@ -31,6 +31,10 @@ bool wizardBuildIsCurrent(const SetupOptions &options, const std::filesystem::pa
 
 bool prepareWizardSelection(WizardConfig &config, InstallFolderSelection &selection)
 {
+    // Changing saves in an installed copy does not change the launcher's folder choice.
+    if (config.manageOnly && config.importSource.empty())
+        return selection.error.empty() &&
+               prepareWizardInstallation(config, selection.destination, selection.error);
     if (config.importSource.empty())
         return selection.prepare() &&
                prepareWizardInstallation(config, selection.destination, selection.error);
@@ -52,12 +56,14 @@ bool prepareWizardInstallation(WizardConfig &config, const std::filesystem::path
         return false;
     if (installationGameRunning(destination, error))
         return false;
+    bool modeSaved = false;
     if (config.modeChosen && config.desiredMode != installation.mode)
     {
         if (installation.recorded || installState(destination) == InstallState::Installed)
         {
             if (!switchSaveMode(installation, config.desiredMode, config.conflict, error))
                 return false;
+            modeSaved = true;
         }
         else
             configureSaveMode(installation, config.desiredMode);
@@ -67,7 +73,7 @@ bool prepareWizardInstallation(WizardConfig &config, const std::filesystem::path
         if (!importInstallation(config.importSource, installation, config.conflict, error))
             return false;
     }
-    else if (!prepareInstallation(installation, error))
+    else if (!modeSaved && !prepareInstallation(installation, error))
         return false;
     config.base.dataDir = destination;
     return true;

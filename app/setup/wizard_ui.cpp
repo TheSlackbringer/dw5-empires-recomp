@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -238,7 +239,7 @@ bool runWizardWindow(WizardConfig &config)
     auto existingDialog = std::make_shared<DialogState>();
     char destinationBuf[32768] = {};
     std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
-    enum class Page { Saves, Disc, Existing, Other, Manage, Copied, Saved };
+    enum class Page { Saves, Disc, Existing, Other, Manage, Copied, Saved, PreparationFailed };
     const auto hasDisc = [&] { return installState(destination.destination) == InstallState::Installed; };
     Page page = config.manageOnly ? Page::Manage
               : !config.importSource.empty() ? Page::Saves
@@ -252,6 +253,8 @@ bool runWizardWindow(WizardConfig &config)
         page = Page::Other;
     };
     std::string actionError;
+    fs::path preparationLog;
+    Page pageBeforeFailure = page;
     std::string saveConfirmation;
     bool returnToExisting = false;
     bool copyFromManagement = false;
@@ -354,6 +357,19 @@ bool runWizardWindow(WizardConfig &config)
             else if (!ok) {
                 actionError = std::move(destination.error);
                 destination.error.clear();
+                if (actionError.empty())
+                    actionError = "Setup could not complete this action.";
+                std::cerr << "Setup: " << actionError << std::endl;
+                const auto root = config.importSource.empty() ? destination.destination : config.importSource;
+                preparationLog.clear();
+                if (!root.empty()) {
+                    const auto logPath = root / "logs" / "installation-management.log";
+                    std::ofstream log(logPath, std::ios::app);
+                    if (log << actionError << '\n' << std::flush)
+                        preparationLog = logPath;
+                }
+                pageBeforeFailure = page;
+                page = Page::PreparationFailed;
             } else if (config.manageOnly) {
                 if (copyFromManagement) {
                     succeeded = true;
@@ -510,6 +526,16 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::TextWrapped("Preparing the installation and verifying file copies...");
                 ImGui::TextWrapped("Original saves are retained. The destination is locked until this finishes.");
                 if(closeAfterPreparation) ImGui::TextWrapped("Closing after the current safe copy finishes.");
+            }
+            else if (!activeRun && page == Page::PreparationFailed) {
+                ImGui::TextUnformatted(pageBeforeFailure == Page::Manage
+                    ? "Could not save the new location" : "Setup could not continue");
+                showError(actionError);
+                if (!preparationLog.empty())
+                    ImGui::TextWrapped("Details saved to %s", pathText(preparationLog).c_str());
+                ImGui::TextWrapped("Go back to review your choice and try again.");
+                if (footer("Back").back)
+                    page = pageBeforeFailure;
             }
             else if (!activeRun && (page == Page::Copied || page == Page::Saved)) {
                 if (page == Page::Copied) {
@@ -688,11 +714,14 @@ bool runWizardWindow(WizardConfig &config)
                     ImGui::PopID();
                 }
                 ImGui::TextWrapped("Already installed DW5E somewhere else? Select its installation folder. No ISO needed.");
-                if (ImGui::Button("Choose an installed DW5E folder...", ImVec2(0, buttonHeight)))
+                const float optionWidth = ImGui::CalcTextSize("Choose an installed DW5E folder...").x +
+                                          2 * ImGui::GetStyle().FramePadding.x;
+                const ImVec2 optionSize(optionWidth, buttonHeight);
+                if (ImGui::Button("Choose an installed DW5E folder...", optionSize))
                     browseExisting();
                 if (!config.manageOnly) {
                     const auto defaultFolder = config.launcherDir / "game-files";
-                    if (ImGui::Button("Start a new installation")) {
+                    if (ImGui::Button("Start a new installation", optionSize)) {
                         beforeFreshSetup = destination;
                         config.importSource.clear();
                         config.modeChosen = false;

@@ -368,6 +368,20 @@ class LauncherInstallTests(unittest.TestCase):
         self.assertFalse((selected / 'generated').exists())
         self.assertFalse((self.reports / 'configure.json').exists())
 
+    def test_manage_changes_saves_with_read_only_launcher_folder(self):
+        installed = self.root / 'writable installation'
+        self.installed(installed)
+        if os.name != 'nt' and os.geteuid() == 0:
+            installed.chmod(0o777)  # Only the synthetic installation is writable by the test user.
+        with self.read_only(self.package):
+            self.launch('--manage', '--no-window', '--use-installation', installed,
+                        '--save-mode', 'portable', drop_privileges=True)
+
+        self.assertEqual(json.loads((installed / 'install.json').read_text())['save_mode'], 'portable')
+        self.assertEqual((installed / 'user-data/save/sentinel').read_bytes(),
+                         (installed / 'save/sentinel').read_bytes())
+        self.assertFalse((self.package / 'dw5e-install.json').exists())
+
     def test_manage_copies_portable_installation_without_launching(self):
         source = self.root / 'old installation ø'
         self.installed(source)
