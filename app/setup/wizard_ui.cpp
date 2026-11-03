@@ -180,7 +180,7 @@ bool runWizardWindow(WizardConfig &config)
     }
 
     const int kWindowW = 680;
-    const int kWindowH = 640;
+    const int kWindowH = 440;
     SDL_Window *window = SDL_CreateWindow("Dynasty Warriors 5: Empires - Setup",
                                           kWindowW, kWindowH,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
@@ -232,6 +232,26 @@ bool runWizardWindow(WizardConfig &config)
     auto existingDialog = std::make_shared<DialogState>();
     char destinationBuf[32768] = {};
     std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
+    enum class Page { Saves, Disc, Existing, Other, Manage };
+    const auto hasDisc = [&] { return installState(destination.destination) == InstallState::Installed; };
+    Page page = config.manageOnly ? Page::Manage
+              : !config.importSource.empty() ? Page::Saves
+              : hasDisc() ? Page::Existing
+              : !config.discovered.empty() || !destination.error.empty() ? Page::Other
+              : config.modeChosen || config.launcherDir.empty() ? Page::Disc : Page::Saves;
+    Page returnFromOptions = page;
+    const auto openOptions = [&] {
+        returnFromOptions = page;
+        page = Page::Other;
+    };
+    std::string actionError;
+    const auto selectDestination = [&](const fs::path &path) {
+        if (!destination.choose(path))
+            return false;
+        actionError.clear();
+        std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
+        return true;
+    };
     std::unique_ptr<SetupRun> activeRun;
     std::unique_ptr<Preparation> preparation;
     bool closeAfterPreparation=false;
@@ -276,32 +296,54 @@ bool runWizardWindow(WizardConfig &config)
         {
             std::lock_guard<std::mutex> lock(folderDialog->mutex);
             if (folderDialog->hasResult) {
-                if (!activeRun && !preparation && destination.choose(pathFromText(folderDialog->selectedFile)))
-                    std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
-                folderDialog->hasResult=false;
+                if (!activeRun && !preparation && selectDestination(pathFromText(folderDialog->selectedFile))) {
+                    if (hasDisc()) {
+                        config.modeChosen = false;
+                        config.importSource.clear();
+                        page = Page::Existing;
+                    } else if (page == Page::Other) {
+                        page = Page::Saves;
+                    }
+                }
+                folderDialog->hasResult = false;
             }
         }
+
         {
             std::lock_guard<std::mutex> lock(existingDialog->mutex);
-            if(existingDialog->hasResult) {
-                if(!activeRun && !preparation) {
-                    const auto existing=existingInstallationRoot(pathFromText(existingDialog->selectedFile));
-                    if(existing.empty()) destination.error="Choose a folder containing a verified DW5E installation.";
-                    else { destination.choose(existing);config.modeChosen=false;config.importSource.clear();
-                        std::snprintf(destinationBuf,sizeof(destinationBuf),"%s",pathText(existing).c_str()); }
+            if (existingDialog->hasResult) {
+                if (!activeRun && !preparation) {
+                    const auto existing = existingInstallationRoot(pathFromText(existingDialog->selectedFile));
+                    if (existing.empty())
+                        actionError = "Choose a folder containing a verified DW5E installation.";
+                    else if (selectDestination(existing)) {
+                        config.modeChosen = false;
+                        config.importSource.clear();
+                        config.conflict = SaveConflict::Ask;
+                        page = config.manageOnly ? Page::Manage : Page::Existing;
+                    }
                 }
-                existingDialog->hasResult=false;
+                existingDialog->hasResult = false;
             }
         }
-        if(preparation && preparation->done.load(std::memory_order_acquire)) {
-            const bool ok=preparation->ok;
-            config=std::move(preparation->config);
-            destination=std::move(preparation->selection);
+        if (preparation && preparation->done.load(std::memory_order_acquire)) {
+            const bool ok = preparation->ok;
+            config = std::move(preparation->config);
+            destination = std::move(preparation->selection);
             preparation.reset();
-            if(closeAfterPreparation) quit=true;
-            else if(ok) {
-                if(config.manageOnly) {succeeded=true;quit=true;}
-                else {activeRun=std::make_unique<SetupRun>(config.base);activeRun->start();}
+            if (closeAfterPreparation)
+                quit = true;
+            else if (!ok) {
+                actionError = std::move(destination.error);
+                destination.error.clear();
+            } else if (config.manageOnly) {
+                succeeded = true;
+                quit = true;
+            } else {
+                config.importSource.clear();
+                actionError.clear();
+                activeRun = std::make_unique<SetupRun>(config.base);
+                activeRun->start();
             }
         }
         destination.frozen=bool(activeRun)||bool(preparation);
@@ -325,81 +367,59 @@ bool runWizardWindow(WizardConfig &config)
             ImGui::Separator();
             ImGui::Spacing();
 
-            if (!config.launcherDir.empty() || config.explicitDestination) {
-                ImGui::TextUnformatted("Installation folder:");
-                ImGui::BeginDisabled(destination.frozen || destination.explicitOverride);
-                ImGui::SetNextItemWidth(-1);
-                if (ImGui::InputText("##InstallFolder", destinationBuf, sizeof(destinationBuf))) {
-                    if (*destinationBuf) destination.choose(pathFromText(destinationBuf));
-                    else destination.error="Choose an installation folder before continuing.";
+            const auto showError = [](const std::string &error) {
+                if (error.empty())
+                    return;
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.30f, 0.30f, 1.0f));
+                ImGui::TextWrapped("%s", error.c_str());
+                ImGui::PopStyleColor();
+            };
+            const auto chooseMode = [&](SaveMode initial) {
+                const SaveMode desired = config.modeChosen ? config.desiredMode : initial;
+                if (ImGui::RadioButton("On this PC (recommended)", desired == SaveMode::Normal)) {
+                    config.desiredMode = SaveMode::Normal;
+                    config.modeChosen = true;
+                    actionError.clear();
+                    config.conflict = SaveConflict::Ask;
                 }
-                if (ImGui::Button("Use game-files beside launcher")) {
-                    destination.choose(config.launcherDir / "game-files");
-                    std::snprintf(destinationBuf,sizeof(destinationBuf),"%s",pathText(destination.destination).c_str());
+                if (ImGui::RadioButton("With the game (portable)", desired == SaveMode::Portable)) {
+                    config.desiredMode = SaveMode::Portable;
+                    config.modeChosen = true;
+                    actionError.clear();
+                    config.conflict = SaveConflict::Ask;
                 }
+                Installation preview;
+                preview.root = destination.destination;
+                configureSaveMode(preview, config.modeChosen ? config.desiredMode : initial);
+                ImGui::TextWrapped("Saves: %s", pathText(preview.userData).c_str());
+                if (preview.configDir != preview.userData)
+                    ImGui::TextWrapped("Settings: %s", pathText(preview.configDir).c_str());
+            };
+            const auto chooseConflict = [&] {
+                if (actionError.find("conflict") == std::string::npos &&
+                    config.conflict == SaveConflict::Ask)
+                    return;
+                ImGui::TextWrapped("Both locations contain progress. Choose which files to use.");
+                if (ImGui::RadioButton("Use current saves and back up destination saves",
+                                       config.conflict == SaveConflict::UseSource))
+                    config.conflict = SaveConflict::UseSource;
+                if (ImGui::RadioButton("Keep destination saves",
+                                       config.conflict == SaveConflict::KeepDestination))
+                    config.conflict = SaveConflict::KeepDestination;
+            };
+            const auto browseExisting = [&] {
+                SDL_ShowOpenFolderDialog(onFolderDialog, new std::shared_ptr<DialogState>(existingDialog),
+                                         window, nullptr, false);
+            };
+            const auto browseDestination = [&] {
+                SDL_ShowOpenFolderDialog(onFolderDialog, new std::shared_ptr<DialogState>(folderDialog),
+                                         window, destinationBuf, false);
+            };
+            const auto exitButton = [&] {
                 ImGui::SameLine();
-                if (ImGui::Button("Choose folder..."))
-                    SDL_ShowOpenFolderDialog(onFolderDialog,new std::shared_ptr<DialogState>(folderDialog),
-                                             window,destinationBuf,false);
-                ImGui::EndDisabled();
-                if(destination.explicitOverride)
-                    ImGui::TextWrapped("This run uses an explicit folder override. The remembered choice is unchanged.");
-                ImGui::TextWrapped("Destination: %s",pathText(destination.destination).c_str());
-                if(!destination.error.empty()) {
-                    ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(0.95f,0.30f,0.30f,1.0f));
-                    ImGui::TextWrapped("%s",destination.error.c_str()); ImGui::PopStyleColor();
-                }
-                ImGui::Separator();
-            }
-
-            if(!activeRun && !preparation && (!config.launcherDir.empty() || config.explicitDestination)) {
-                for(const auto &candidate:config.discovered) {
-                    const auto label="Use "+pathText(candidate);
-                    if(ImGui::Button(label.c_str())) {
-                        destination.choose(candidate);config.modeChosen=false;config.importSource.clear();
-                        std::snprintf(destinationBuf,sizeof(destinationBuf),"%s",pathText(candidate).c_str());
-                    }
-                }
-                if(ImGui::Button("Use existing installation..."))
-                    SDL_ShowOpenFolderDialog(onFolderDialog,new std::shared_ptr<DialogState>(existingDialog),window,nullptr,false);
-                Installation selected;std::string selectedError;
-                if(loadInstallation(destination.destination,selected,selectedError)) {
-                    Installation preview=selected;
-                    const bool choosing=!selected.recorded && installState(selected.root)!=InstallState::Installed;
-                    if(choosing || config.manageOnly) {
-                        ImGui::TextUnformatted("Where should saves and settings be stored?");
-                        const auto desired=config.modeChosen?config.desiredMode:selected.mode;
-                        if(ImGui::RadioButton("On this PC (recommended)",desired==SaveMode::Normal)) {
-                            config.desiredMode=SaveMode::Normal;config.modeChosen=true;destination.error.clear();
-                        }
-                        if(ImGui::RadioButton("With the game (portable)",desired==SaveMode::Portable)) {
-                            config.desiredMode=SaveMode::Portable;config.modeChosen=true;destination.error.clear();
-                        }
-                        if(config.modeChosen) configureSaveMode(preview,config.desiredMode);
-                    } else {
-                        ImGui::Text("Save location: %s",selected.mode==SaveMode::Normal?"On this PC":selected.mode==SaveMode::Portable?"With the game (portable)":"Existing legacy installation");
-                        if(ImGui::Button("Manage save location")) config.manageOnly=true;
-                    }
-                    ImGui::TextWrapped("Saves: %s",pathText(preview.userData).c_str());
-                    ImGui::TextWrapped("Settings: %s",pathText(preview.configDir).c_str());
-                    if(config.manageOnly) {
-                        ImGui::TextWrapped("Close the game before switching. Original saves are kept as a backup.");
-                        if(destination.error.find("conflict")!=std::string::npos || config.conflict!=SaveConflict::Ask) {
-                            ImGui::TextWrapped("Both locations contain progress. Choose which files to use:");
-                            if(ImGui::RadioButton("Use current saves (back up conflicting destination files)",config.conflict==SaveConflict::UseSource)) {config.conflict=SaveConflict::UseSource;destination.error.clear();}
-                            if(ImGui::RadioButton("Keep destination saves",config.conflict==SaveConflict::KeepDestination)) {config.conflict=SaveConflict::KeepDestination;destination.error.clear();}
-                        }
-                    }
-                    if(selected.mode==SaveMode::Legacy && selected.root!=config.launcherDir/"game-files") {
-                        if(ImGui::Button("Import into game-files (keep original installation)")) {
-                            config.importSource=selected.root;destination.choose(config.launcherDir/"game-files");
-                            config.modeChosen=true;config.desiredMode=SaveMode::Normal;config.manageOnly=false;
-                            std::snprintf(destinationBuf,sizeof(destinationBuf),"%s",pathText(destination.destination).c_str());
-                        }
-                    }
-                } else if(destination.error.empty()) destination.error=selectedError;
-                ImGui::Separator();
-            }
+                if (ImGui::Button("Exit", ImVec2(100, 36)))
+                    quit = true;
+            };
 
             if (!config.layoutError.empty())
             {
@@ -414,11 +434,137 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::TextWrapped("Original saves are retained. The destination is locked until this finishes.");
                 if(closeAfterPreparation) ImGui::TextWrapped("Closing after the current safe copy finishes.");
             }
-            else if(config.manageOnly && !activeRun) {
-                if(ImGui::Button("Save change",ImVec2(160,36))) {
+            else if (!activeRun && page == Page::Manage) {
+                ImGui::TextUnformatted("Manage save location");
+                ImGui::TextWrapped("%s", pathText(destination.destination).c_str());
+                Installation current;
+                std::string metadataError;
+                const bool loaded = destination.error.empty() &&
+                                    loadInstallation(destination.destination, current, metadataError);
+                const bool canManage = loaded && hasDisc();
+                if (canManage) {
+                    ImGui::TextWrapped("Current saves: %s", pathText(current.userData).c_str());
+                    chooseMode(current.mode == SaveMode::Portable ? SaveMode::Portable : SaveMode::Normal);
+                    chooseConflict();
+                    ImGui::TextWrapped("Close the game before switching. Your original saves are kept.");
+                } else if (loaded) {
+                    ImGui::TextWrapped("Choose an installed copy of DW5E to manage its saves.");
+                }
+                showError(destination.error);
+                showError(metadataError);
+                showError(actionError);
+                ImGui::BeginDisabled(!canManage || !config.modeChosen || config.desiredMode == current.mode);
+                if (ImGui::Button("Save change", ImVec2(160, 36)))
+                    beginPreparation();
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                if (ImGui::Button("Close", ImVec2(100, 36)))
+                    quit = true;
+                if (!canManage && !destination.explicitOverride &&
+                    ImGui::SmallButton("Choose installation..."))
+                    openOptions();
+            }
+            else if (!activeRun && page == Page::Saves) {
+                ImGui::TextDisabled(config.importSource.empty() ? "Step 1 of 2" : "Import installation");
+                ImGui::TextUnformatted("Where should saves and settings be stored?");
+                chooseMode(SaveMode::Normal);
+                showError(actionError);
+                ImGui::Spacing();
+                if (ImGui::Button("Continue", ImVec2(160, 36))) {
+                    config.modeChosen = true;
+                    page = config.importSource.empty() ? Page::Disc : Page::Existing;
+                }
+                if (!destination.explicitOverride && config.importSource.empty()) {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Other options", ImVec2(120, 36)))
+                        openOptions();
+                }
+                exitButton();
+            }
+            else if (!activeRun && page == Page::Existing) {
+                const bool importing = !config.importSource.empty();
+                ImGui::TextUnformatted(importing ? "Import your existing installation" : "We found your DW5E installation");
+                ImGui::TextWrapped("%s", pathText(importing ? config.importSource : destination.destination).c_str());
+                if (importing) {
+                    ImGui::TextWrapped("Copy into %s. Your original installation will be kept.",
+                                       pathText(destination.destination).c_str());
+                    chooseConflict();
+                }
+                ImGui::TextWrapped("Setup will use the installed game files.");
+                showError(destination.error);
+                showError(actionError);
+                ImGui::Spacing();
+                ImGui::BeginDisabled(!destination.error.empty());
+                if (ImGui::Button(importing ? "Import & Play" : "Use this installation", ImVec2(180, 36))) {
+                    config.base.discIso.clear();
                     beginPreparation();
                 }
-                ImGui::SameLine();if(ImGui::Button("Close",ImVec2(100,36))) quit=true;
+                ImGui::EndDisabled();
+                if (importing) {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Back", ImVec2(100, 36)))
+                        page = Page::Saves;
+                } else if (!destination.explicitOverride) {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Other options", ImVec2(120, 36)))
+                        openOptions();
+                }
+                exitButton();
+            }
+            else if (!activeRun && page == Page::Other) {
+                ImGui::TextUnformatted(config.manageOnly ? "Choose an installation to manage" : "Installation options");
+                showError(destination.error);
+                showError(actionError);
+                ImGui::BeginDisabled(destination.explicitOverride);
+                for (size_t i = 0; i < config.discovered.size(); ++i) {
+                    if (config.discovered[i] == destination.destination && returnFromOptions == Page::Existing)
+                        continue;
+                    ImGui::PushID(static_cast<int>(i));
+                    ImGui::TextWrapped("%s", pathText(config.discovered[i]).c_str());
+                    if (ImGui::SmallButton("Use this installation") && selectDestination(config.discovered[i])) {
+                        config.importSource.clear();
+                        config.modeChosen = false;
+                        config.conflict = SaveConflict::Ask;
+                        page = config.manageOnly ? Page::Manage : Page::Existing;
+                    }
+                    ImGui::PopID();
+                }
+                if (ImGui::Button("Browse for existing installation..."))
+                    browseExisting();
+                if (!config.manageOnly) {
+                    const auto defaultFolder = config.launcherDir / "game-files";
+                    if (hasDisc() && destination.destination != defaultFolder &&
+                        installState(defaultFolder) != InstallState::Installed &&
+                        ImGui::Button("Import into game-files")) {
+                        const auto source = destination.destination;
+                        if (selectDestination(defaultFolder)) {
+                            config.importSource = source;
+                            config.modeChosen = false;
+                            config.conflict = SaveConflict::Ask;
+                            page = Page::Saves;
+                        }
+                    }
+                    if (ImGui::Button("Start a new installation")) {
+                        config.importSource.clear();
+                        config.modeChosen = false;
+                        config.conflict = SaveConflict::Ask;
+                        if (installState(defaultFolder) == InstallState::Installed) {
+                            actionError = "Choose a separate folder for a new installation.";
+                            browseDestination();
+                        } else if (selectDestination(defaultFolder)) {
+                            page = Page::Saves;
+                        }
+                    }
+                }
+                ImGui::EndDisabled();
+                ImGui::Spacing();
+                if (returnFromOptions != Page::Other) {
+                    if (ImGui::Button("Back", ImVec2(100, 36)))
+                        page = returnFromOptions;
+                    exitButton();
+                } else if (ImGui::Button("Exit", ImVec2(100, 36))) {
+                    quit = true;
+                }
             }
             else if (!activeRun)
             {
@@ -452,8 +598,10 @@ bool runWizardWindow(WizardConfig &config)
                     }
                 }
 
-                ImGui::TextWrapped("To play, select your legally owned retail European PAL disc image (.iso). "
-                                   "The wizard will extract game assets, translate the PowerPC code, and compile the native executable.");
+                if (!config.launcherDir.empty())
+                    ImGui::TextDisabled("Step 2 of 2");
+                ImGui::TextUnformatted("Select your disc image");
+                ImGui::TextWrapped("Choose your legally owned European PAL disc image (.iso).");
                 ImGui::Spacing();
 
                 ImGui::Text("Disc Image (.iso):");
@@ -514,33 +662,30 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::TextDisabled("Estimated time on first launch: ~2 to 4 minutes.");
                 ImGui::Spacing();
 
-                bool canStart = false;
-                if (isoValid)
-                {
-                    canStart = true;
+                if (!config.launcherDir.empty() || destination.explicitOverride) {
+                    ImGui::TextWrapped("Install to: %s", destinationBuf);
+                    if (!destination.explicitOverride && ImGui::SmallButton("Change folder..."))
+                        browseDestination();
                 }
-                else if (validatedIsoPath.empty() &&
-                         installState(destination.destination) == InstallState::Installed)
-                {
-                    canStart = true;
-                }
+                showError(destination.error);
+                showError(actionError);
+                ImGui::Spacing();
 
-                canStart = canStart && destination.error.empty() && !destination.destination.empty();
-                if (!canStart)
-                    ImGui::BeginDisabled();
-
-                if (ImGui::Button("Install & Play", ImVec2(160, 36)))
-                {
-                    if(isoValid) config.base.discIso=pathFromText(validatedIsoPath);
+                const bool canStart = isoValid && currentIso == isoPathBuf && destination.error.empty() &&
+                                      !destination.destination.empty() && !hasDisc();
+                ImGui::BeginDisabled(!canStart);
+                if (ImGui::Button("Install & Play", ImVec2(160, 36))) {
+                    config.base.discIso = pathFromText(validatedIsoPath);
                     beginPreparation();
                 }
+                ImGui::EndDisabled();
 
-                if (!canStart)
-                    ImGui::EndDisabled();
-
-                ImGui::SameLine();
-                if (ImGui::Button("Exit", ImVec2(100, 36)))
-                    quit = true;
+                if (!config.launcherDir.empty()) {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Back", ImVec2(100, 36)))
+                        page = Page::Saves;
+                }
+                exitButton();
             }
             else
             {
@@ -574,13 +719,18 @@ bool runWizardWindow(WizardConfig &config)
                     if (ImGui::Button("Back", ImVec2(120, 32)))
                     {
                         activeRun.reset();
+                        if (hasDisc())
+                            page = Page::Existing;
                     }
                 }
                 else if (st.cancelled)
                 {
                     ImGui::TextWrapped("Setup cancelled. You can retry with your installed files or choose a disc image.");
-                    if (ImGui::Button("Back", ImVec2(120, 32)))
+                    if (ImGui::Button("Back", ImVec2(120, 32))) {
                         activeRun.reset();
+                        if (hasDisc())
+                            page = Page::Existing;
+                    }
                 }
                 else if (st.finished)
                 {
