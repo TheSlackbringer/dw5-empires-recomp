@@ -270,6 +270,15 @@ class LauncherInstallTests(unittest.TestCase):
         self.assertEqual(self.sentinels(selected), original)
         self.assertFalse((self.package / 'build').exists())
 
+    def test_opening_launcher_leaves_no_unused_default_folder(self):
+        self.launch('--no-window', expected=1)
+        self.assertFalse((self.package / 'game-files').exists())
+        selected = self.root / 'chosen elsewhere'
+        self.installed(selected)
+        self.env['DW5E_FIXTURE_GUI_FOLDER'] = str(selected)
+        self.check_game(self.launch(driver=True, game=True), selected)
+        self.assertFalse((self.package / 'game-files').exists())
+
     def test_overrides_and_external_choice_survive_launcher_only_move(self):
         selected = self.root / 'remembered'
         self.installed(selected)

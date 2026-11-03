@@ -160,7 +160,7 @@ int main(int argc, char **argv)
             else if(!explicitDestination) data=launcher/"game-files";
         }
         if (destinationError.empty() && !loadInstallation(data, storage, resolveError)) destinationError=resolveError;
-        if (destinationError.empty() && !args.status && !validateInstallDirectory(data, resolveError))
+        if (destinationError.empty() && !args.status && !checkInstallDirectory(data, resolveError))
             destinationError = resolveError;
         options.dataDir = data;
         game = options.effectiveBuildDir() / (kWindows ? "dw5e.exe" : "dw5e");

@@ -106,6 +106,16 @@ static void SDLCALL onFolderDialog(void *userdata, const char * const *files, in
     }
 }
 
+static bool consoleHasDisc(const SetupOptions &options)
+{
+    if (!options.discIso.empty() || installState(options.effectiveDataDir()) == InstallState::Installed)
+        return true;
+    std::cerr << "\nERROR: No disc image specified.\n"
+              << "To run in console mode: pass --iso /path/to/dw5e.iso\n"
+              << "Otherwise, launch from a desktop session with display available.\n";
+    return false;
+}
+
 int runWizardConsole(const SetupOptions &options)
 {
     std::cout << "====================================================\n";
@@ -116,14 +126,8 @@ int runWizardConsole(const SetupOptions &options)
         std::cout << "Disc image:     " << pathText(options.discIso) << "\n";
     std::cout << "----------------------------------------------------\n";
 
-    if (options.discIso.empty() &&
-        installState(options.effectiveDataDir()) != InstallState::Installed)
-    {
-        std::cerr << "\nERROR: No disc image specified.\n"
-                  << "To run in console mode: pass --iso /path/to/dw5e.iso\n"
-                  << "Otherwise, launch from a desktop session with display available.\n";
+    if (!consoleHasDisc(options))
         return 1;
-    }
 
     SetupRun run(options);
     run.start();
@@ -173,6 +177,10 @@ bool runWizardWindow(WizardConfig &config)
         if (!config.layoutError.empty()) {
             std::cerr << "Setup error: " << config.layoutError << std::endl; return false;
         }
+        // Without a disc there is nothing to install, so leave the folder uncreated.
+        if(!config.manageOnly && config.importSource.empty() && destination.error.empty() &&
+           !consoleHasDisc(config.base))
+            return false;
         if(!prepareWizardSelection(config,destination)) {
             std::cerr<<"Setup destination/save-location error: "<<destination.error<<std::endl; return false;
         }
@@ -1003,7 +1011,7 @@ bool runWizardWindow(WizardConfig &config)
 
                 const float progressVal = static_cast<float>(st.overall);
                 char overlay[64];
-                std::snprintf(overlay, sizeof(overlay), "%.0f%% overall", progressVal * 100.0f);
+                std::snprintf(overlay, sizeof(overlay), "%.0f%%", progressVal * 100.0f);
                 ImGui::ProgressBar(progressVal, ImVec2(-1, 26), overlay);
 
                 ImGui::Spacing();

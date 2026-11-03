@@ -288,6 +288,23 @@ bool validateInstallDirectory(const fs::path &directory, std::string &error)
         return failure(probe, "cannot remove the access-check file: " + ec.message(), error);
     return true;
 }
+bool checkInstallDirectory(const fs::path &directory, std::string &error)
+{
+    error.clear();
+    if (directory.empty())
+        return failure(directory, "no installation folder selected", error);
+    std::error_code ec;
+    auto existing = directory;
+    while (!fs::exists(existing, ec))
+    {
+        if (ec || existing == existing.parent_path())
+            return failure(directory, ec ? ec.message() : "no existing parent folder", error);
+        existing = existing.parent_path();
+    }
+    if (!fs::is_directory(existing, ec) || ec)
+        return failure(directory, ec ? ec.message() : "not a directory", error);
+    return validateInstallDirectory(existing, error);
+}
 bool rememberInstallLocation(const fs::path &launcher, const fs::path &destination, std::string &error)
 {
     error.clear();

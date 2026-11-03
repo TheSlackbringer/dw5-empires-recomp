@@ -93,6 +93,18 @@ int main()
     write(scratch / "file", "not a directory");
     check(!validateInstallDirectory(scratch / "file", error) && error.find("file") != std::string::npos,
           "file destination rejected with selected path");
+    check(checkInstallDirectory(scratch / "unmade" / "deep", error) && !fs::exists(scratch / "unmade"),
+          "checking a missing destination does not create it");
+    check(checkInstallDirectory(external, error) && fs::is_directory(external),
+          "existing destination passes the check");
+    check(!checkInstallDirectory(scratch / "file", error) && error.find("file") != std::string::npos,
+          "checking a file destination rejects it");
+    check(!checkInstallDirectory(scratch / "file" / "child", error) && error.find("child") != std::string::npos,
+          "checking a destination below a file rejects it");
+    size_t leftovers = 0;
+    for (const auto &entry : fs::directory_iterator(scratch))
+        leftovers += entry.path().filename().string().rfind(".dw5e-write-check-", 0) == 0;
+    check(leftovers == 0, "checking a destination leaves no access-check file");
     check(rememberInstallLocation(launcher, external, error), "external folder choice saved");
     const auto moved = scratch / "moved package";
     fs::rename(launcher, moved);
