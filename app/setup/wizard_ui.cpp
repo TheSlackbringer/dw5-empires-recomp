@@ -7,6 +7,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #ifdef _WIN32
@@ -191,6 +192,8 @@ bool runWizardWindow(WizardConfig &config)
         return console();
     }
 
+    SDL_SetWindowMinimumSize(window, 360, 280);
+
     SDL_Renderer *renderer = SDL_CreateRenderer(window, nullptr);
     if (!renderer)
     {
@@ -207,14 +210,16 @@ bool runWizardWindow(WizardConfig &config)
     io.IniFilename = nullptr; // The wizard has no persistent window layout outside the installation.
     ImGui::StyleColorsDark();
 
-    // Dark sleek theme
+    // Shared installer chrome, spacing and button hierarchy.
     ImGuiStyle &style = ImGui::GetStyle();
     style.WindowRounding = 6.0f;
-    style.FrameRounding = 4.0f;
+    style.FrameRounding = 5.0f;
+    style.WindowPadding = ImVec2(20, 14);
+    style.ItemSpacing = ImVec2(9, 9);
     style.Colors[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.11f, 0.13f, 1.0f);
     style.Colors[ImGuiCol_Header] = ImVec4(0.20f, 0.25f, 0.32f, 1.0f);
-    style.Colors[ImGuiCol_Button] = ImVec4(0.18f, 0.38f, 0.58f, 1.0f);
-    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.25f, 0.48f, 0.72f, 1.0f);
+    style.Colors[ImGuiCol_Button] = ImVec4(0.19f, 0.22f, 0.27f, 1.0f);
+    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.25f, 0.30f, 0.37f, 1.0f);
     style.Colors[ImGuiCol_PlotHistogram] = ImVec4(0.25f, 0.65f, 0.45f, 1.0f);
 
     ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
@@ -240,6 +245,7 @@ bool runWizardWindow(WizardConfig &config)
               : !config.discovered.empty() || !destination.error.empty() ? Page::Other
               : config.modeChosen || config.launcherDir.empty() ? Page::Disc : Page::Saves;
     Page returnFromOptions = page;
+    std::optional<InstallFolderSelection> beforeFreshSetup;
     const auto openOptions = [&] {
         returnFromOptions = page;
         page = Page::Other;
@@ -305,6 +311,7 @@ bool runWizardWindow(WizardConfig &config)
             if (folderDialog->hasResult) {
                 if (!activeRun && !preparation && selectDestination(pathFromText(folderDialog->selectedFile))) {
                     if (hasDisc()) {
+                        beforeFreshSetup.reset();
                         config.modeChosen = false;
                         config.importSource.clear();
                         page = Page::Existing;
@@ -324,6 +331,7 @@ bool runWizardWindow(WizardConfig &config)
                     if (existing.empty())
                         actionError = "Choose a folder containing a verified DW5E installation.";
                     else if (selectDestination(existing)) {
+                        beforeFreshSetup.reset();
                         config.modeChosen = false;
                         config.importSource.clear();
                         config.conflict = SaveConflict::Ask;
@@ -372,10 +380,55 @@ bool runWizardWindow(WizardConfig &config)
 
         if (ImGui::Begin("SetupWindow", nullptr, flags))
         {
-            ImGui::TextColored(ImVec4(0.30f, 0.75f, 0.95f, 1.0f), "Dynasty Warriors 5: Empires (Xbox 360)");
-            ImGui::TextDisabled("Native PC Port via Static Recompilation");
-            ImGui::Separator();
-            ImGui::Spacing();
+            constexpr float buttonHeight = 36.0f;
+            const float gap = ImGui::GetStyle().ItemSpacing.x;
+            const float footerHeight = buttonHeight + 2 * ImGui::GetStyle().ItemSpacing.y + 1;
+            const float bodyHeight = ImGui::GetContentRegionAvail().y - footerHeight;
+            ImGui::PushID(preparation ? -1 : activeRun ? -2 : static_cast<int>(page));
+            ImGui::BeginChild("PageBody", ImVec2(0, bodyHeight));
+
+            struct FooterResult { bool back = false; bool primary = false; };
+            bool footerDrawn = false;
+            const auto footer = [&](const char *back = nullptr, const char *primary = nullptr,
+                                    bool primaryEnabled = true) {
+                ImGui::EndChild();
+                footerDrawn = true;
+                ImGui::Separator();
+                FooterResult result;
+                const float backWidth = back ? 100.0f : 0.0f;
+                const float primaryWidth = primary ? 180.0f : 0.0f;
+                const float total = backWidth + primaryWidth + (back && primary ? gap : 0.0f);
+                const float available = ImGui::GetContentRegionAvail().x;
+                if (total > 0 && available > total)
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - total);
+                if (back)
+                    result.back = ImGui::Button(back, ImVec2(backWidth, buttonHeight));
+                if (primary) {
+                    if (back)
+                        ImGui::SameLine();
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.43f, 0.66f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.52f, 0.76f, 1.0f));
+                    ImGui::BeginDisabled(!primaryEnabled);
+                    result.primary = ImGui::Button(primary, ImVec2(primaryWidth, buttonHeight));
+                    ImGui::EndDisabled();
+                    ImGui::PopStyleColor(2);
+                }
+                return result;
+            };
+            const auto link = [](const char *label) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.58f, 0.80f, 1.0f, 1.0f));
+                const bool pressed = ImGui::Button(label);
+                const ImVec2 first = ImGui::GetItemRectMin();
+                const ImVec2 last = ImGui::GetItemRectMax();
+                const ImVec2 padding = ImGui::GetStyle().FramePadding;
+                const float underline = last.y - padding.y;
+                ImGui::GetWindowDrawList()->AddLine(ImVec2(first.x + padding.x, underline),
+                                                   ImVec2(last.x - padding.x, underline),
+                                                   ImGui::GetColorU32(ImGuiCol_Text));
+                ImGui::PopStyleColor(2);
+                return pressed;
+            };
 
             const auto showError = [](const std::string &error) {
                 if (error.empty())
@@ -425,19 +478,11 @@ bool runWizardWindow(WizardConfig &config)
                 SDL_ShowOpenFolderDialog(onFolderDialog, new std::shared_ptr<DialogState>(folderDialog),
                                          window, destinationBuf, false);
             };
-            const auto exitButton = [&] {
-                ImGui::SameLine();
-                if (ImGui::Button("Exit", ImVec2(100, 36)))
-                    quit = true;
-            };
-
             if (!config.layoutError.empty())
             {
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.30f, 0.30f, 1.0f));
                 ImGui::TextWrapped("Setup Error: %s", config.layoutError.c_str());
                 ImGui::PopStyleColor();
-                if (ImGui::Button("Exit", ImVec2(100, 36)))
-                    quit = true;
             }
             else if(preparation) {
                 ImGui::TextWrapped("Preparing the installation and verifying file copies...");
@@ -448,7 +493,7 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::TextUnformatted("Installation copied");
                 ImGui::TextWrapped("%s", pathText(destination.destination).c_str());
                 ImGui::TextWrapped("Open this launcher to play from the new copy. Your original installation is still in place.");
-                if (ImGui::Button("Done", ImVec2(100, 36)))
+                if (footer(nullptr, "Done").primary)
                     quit = true;
             }
             else if (!activeRun && page == Page::Manage) {
@@ -470,23 +515,6 @@ bool runWizardWindow(WizardConfig &config)
                 showError(destination.error);
                 showError(metadataError);
                 showError(actionError);
-                ImGui::BeginDisabled(!canManage || !config.modeChosen || config.desiredMode == current.mode);
-                if (ImGui::Button("Save change", ImVec2(160, 36)))
-                    beginPreparation();
-                ImGui::EndDisabled();
-                ImGui::SameLine();
-                if (ImGui::Button(returnToExisting ? "Back" : "Close", ImVec2(100, 36))) {
-                    if (returnToExisting) {
-                        config.manageOnly = false;
-                        config.modeChosen = false;
-                        config.conflict = SaveConflict::Ask;
-                        actionError.clear();
-                        returnToExisting = false;
-                        page = Page::Existing;
-                    } else {
-                        quit = true;
-                    }
-                }
                 const auto copyDestination = config.launcherDir / "game-files";
                 if (canManage && !destination.explicitOverride && !config.launcherDir.empty() &&
                     destination.destination != copyDestination &&
@@ -507,6 +535,18 @@ bool runWizardWindow(WizardConfig &config)
                 if (!canManage && !destination.explicitOverride &&
                     ImGui::SmallButton("Choose installation..."))
                     openOptions();
+                const auto actions = footer(returnToExisting ? "Back" : nullptr, "Save change",
+                                            canManage && config.modeChosen && config.desiredMode != current.mode);
+                if (actions.back) {
+                    config.manageOnly = false;
+                    config.modeChosen = false;
+                    config.conflict = SaveConflict::Ask;
+                    actionError.clear();
+                    returnToExisting = false;
+                    page = Page::Existing;
+                }
+                if (actions.primary)
+                    beginPreparation();
             }
             else if (!activeRun && page == Page::Saves) {
                 ImGui::TextDisabled(config.importSource.empty() ? "Step 1 of 2" : "Copy installation");
@@ -517,25 +557,31 @@ bool runWizardWindow(WizardConfig &config)
                     ImGui::TextWrapped("Choose Portable if you want saves and settings to travel with the copy.");
                 showError(actionError);
                 ImGui::Spacing();
-                if (ImGui::Button("Continue", ImVec2(160, 36))) {
-                    config.modeChosen = true;
-                    page = config.importSource.empty() ? Page::Disc : Page::Existing;
-                }
-                if (copyFromManagement) {
-                    ImGui::SameLine();
-                    if (ImGui::Button("Back", ImVec2(100, 36)) && selectDestination(config.importSource)) {
+                if (!beforeFreshSetup && !destination.explicitOverride &&
+                    config.importSource.empty() && link("Other options"))
+                    openOptions();
+                const auto actions = footer(copyFromManagement || beforeFreshSetup ? "Back" : nullptr,
+                                            "Continue");
+                if (actions.back) {
+                    if (copyFromManagement && selectDestination(config.importSource)) {
                         config.importSource.clear();
                         config.modeChosen = false;
                         config.conflict = SaveConflict::Ask;
                         copyFromManagement = false;
                         page = Page::Manage;
+                    } else if (beforeFreshSetup) {
+                        destination = std::move(*beforeFreshSetup);
+                        beforeFreshSetup.reset();
+                        std::snprintf(destinationBuf, sizeof(destinationBuf), "%s",
+                                      pathText(destination.destination).c_str());
+                        actionError.clear();
+                        page = Page::Other;
                     }
-                } else if (!destination.explicitOverride && config.importSource.empty()) {
-                    ImGui::SameLine();
-                    if (ImGui::Button("Other options", ImVec2(120, 36)))
-                        openOptions();
                 }
-                exitButton();
+                if (actions.primary) {
+                    config.modeChosen = true;
+                    page = config.importSource.empty() ? Page::Disc : Page::Existing;
+                }
             }
             else if (!activeRun && page == Page::Existing) {
                 const bool importing = !config.importSource.empty();
@@ -546,42 +592,48 @@ bool runWizardWindow(WizardConfig &config)
                     ImGui::TextWrapped("This creates a second copy. Your current installation stays where it is. No ISO needed.");
                     chooseConflict();
                 } else {
-                    ImGui::TextWrapped("%s", pathText(destination.destination).c_str());
                     ImGui::TextWrapped("Update if needed and play from this folder. No ISO needed.");
+                    const auto path = pathText(destination.destination);
+                    const ImVec2 padding(12, 9);
+                    const float wrapWidth = ImGui::GetContentRegionAvail().x - 2 * padding.x;
+                    const float panelHeight = ImGui::GetTextLineHeightWithSpacing() +
+                        ImGui::CalcTextSize(path.c_str(), nullptr, false, wrapWidth).y + 2 * padding.y + 2;
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, padding);
+                    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
+                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.14f, 0.17f, 0.21f, 1.0f));
+                    ImGui::BeginChild("DetectedFolder", ImVec2(0, panelHeight),
+                                      ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+                    ImGui::TextDisabled("Installation folder");
+                    ImGui::TextWrapped("%s", path.c_str());
+                    ImGui::EndChild();
+                    ImGui::PopStyleColor();
+                    ImGui::PopStyleVar(2);
                 }
                 showError(destination.error);
                 showError(actionError);
                 ImGui::Spacing();
-                constexpr float actionHeight = 36.0f;
-                const float rowEnd = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
-                const auto nextAction = [&](const char *label, float width) {
-                    if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + width <= rowEnd)
-                        ImGui::SameLine();
-                    return ImGui::Button(label, ImVec2(width, actionHeight));
-                };
-                ImGui::BeginDisabled(!destination.error.empty());
-                const char *primary = copyFromManagement ? "Copy installation"
-                                      : importing ? "Copy & Play" : "Use this installation";
-                if (ImGui::Button(primary, ImVec2(180, actionHeight))) {
-                    config.base.discIso.clear();
-                    beginPreparation();
-                }
-                ImGui::EndDisabled();
-                if (importing) {
-                    if (nextAction("Back", 100))
-                        page = Page::Saves;
-                } else {
-                    if (nextAction("Manage installation", 165)) {
+                if (!importing) {
+                    if (link("Manage installation")) {
                         config.manageOnly = true;
                         returnToExisting = true;
                         actionError.clear();
                         page = Page::Manage;
                     }
-                    if (!destination.explicitOverride && nextAction("Other options", 120))
-                        openOptions();
+                    if (!destination.explicitOverride) {
+                        ImGui::SameLine();
+                        if (link("Other options"))
+                            openOptions();
+                    }
                 }
-                if (nextAction("Exit", 100))
-                    quit = true;
+                const char *primary = copyFromManagement ? "Copy installation"
+                                      : importing ? "Copy & Play" : "Use this installation";
+                const auto actions = footer(importing ? "Back" : nullptr, primary, destination.error.empty());
+                if (actions.back)
+                    page = Page::Saves;
+                if (actions.primary) {
+                    config.base.discIso.clear();
+                    beginPreparation();
+                }
             }
             else if (!activeRun && page == Page::Other) {
                 ImGui::TextUnformatted(config.manageOnly ? "Choose an installation to manage" : "Installation options");
@@ -594,6 +646,7 @@ bool runWizardWindow(WizardConfig &config)
                     ImGui::PushID(static_cast<int>(i));
                     ImGui::TextWrapped("%s", pathText(config.discovered[i]).c_str());
                     if (ImGui::SmallButton("Use this installation") && selectDestination(config.discovered[i])) {
+                        beforeFreshSetup.reset();
                         config.importSource.clear();
                         config.modeChosen = false;
                         config.conflict = SaveConflict::Ask;
@@ -606,6 +659,7 @@ bool runWizardWindow(WizardConfig &config)
                 if (!config.manageOnly) {
                     const auto defaultFolder = config.launcherDir / "game-files";
                     if (ImGui::Button("Start a new installation")) {
+                        beforeFreshSetup = destination;
                         config.importSource.clear();
                         config.modeChosen = false;
                         config.conflict = SaveConflict::Ask;
@@ -619,13 +673,8 @@ bool runWizardWindow(WizardConfig &config)
                 }
                 ImGui::EndDisabled();
                 ImGui::Spacing();
-                if (returnFromOptions != Page::Other) {
-                    if (ImGui::Button("Back", ImVec2(100, 36)))
-                        page = returnFromOptions;
-                    exitButton();
-                } else if (ImGui::Button("Exit", ImVec2(100, 36))) {
-                    quit = true;
-                }
+                if (footer(returnFromOptions != Page::Other ? "Back" : nullptr).back)
+                    page = returnFromOptions;
             }
             else if (!activeRun)
             {
@@ -734,19 +783,14 @@ bool runWizardWindow(WizardConfig &config)
 
                 const bool canStart = isoValid && currentIso == isoPathBuf && destination.error.empty() &&
                                       !destination.destination.empty() && !hasDisc();
-                ImGui::BeginDisabled(!canStart);
-                if (ImGui::Button("Install & Play", ImVec2(160, 36))) {
+                const auto actions = footer(config.launcherDir.empty() ? nullptr : "Back",
+                                            "Install & Play", canStart);
+                if (actions.back)
+                    page = Page::Saves;
+                if (actions.primary) {
                     config.base.discIso = pathFromText(validatedIsoPath);
                     beginPreparation();
                 }
-                ImGui::EndDisabled();
-
-                if (!config.launcherDir.empty()) {
-                    ImGui::SameLine();
-                    if (ImGui::Button("Back", ImVec2(100, 36)))
-                        page = Page::Saves;
-                }
-                exitButton();
             }
             else
             {
@@ -766,7 +810,7 @@ bool runWizardWindow(WizardConfig &config)
 
                 if (st.running)
                 {
-                    if (ImGui::Button("Cancel", ImVec2(120, 32)))
+                    if (footer("Cancel").back)
                     {
                         activeRun->cancel();
                     }
@@ -777,7 +821,7 @@ bool runWizardWindow(WizardConfig &config)
                     ImGui::TextWrapped("Failed: %s", st.error.c_str());
                     ImGui::PopStyleColor();
                     ImGui::Spacing();
-                    if (ImGui::Button("Back", ImVec2(120, 32)))
+                    if (footer("Back").back)
                     {
                         activeRun.reset();
                         if (hasDisc())
@@ -787,7 +831,7 @@ bool runWizardWindow(WizardConfig &config)
                 else if (st.cancelled)
                 {
                     ImGui::TextWrapped("Setup cancelled. You can retry with your installed files or choose a disc image.");
-                    if (ImGui::Button("Back", ImVec2(120, 32))) {
+                    if (footer("Back").back) {
                         activeRun.reset();
                         if (hasDisc())
                             page = Page::Existing;
@@ -803,6 +847,9 @@ bool runWizardWindow(WizardConfig &config)
                     }
                 }
             }
+            if (!footerDrawn)
+                footer();
+            ImGui::PopID();
         }
         ImGui::End();
 
