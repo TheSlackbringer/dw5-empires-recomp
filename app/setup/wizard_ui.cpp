@@ -215,6 +215,19 @@ bool runWizardWindow(WizardConfig &config)
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.IniFilename = nullptr; // The wizard has no persistent window layout outside the installation.
+    const auto fontPath = config.base.root / "rexglue-sdk/thirdparty/imgui/misc/fonts/Roboto-Medium.ttf";
+    std::ifstream fontFile(fontPath, std::ios::binary | std::ios::ate);
+    const auto fontSize = fontFile.tellg();
+    if (fontSize > 0 && fontSize <= 1024 * 1024) {
+        const auto bytes = static_cast<int>(fontSize);
+        if (void *fontData = ImGui::MemAlloc(bytes)) {
+            fontFile.seekg(0);
+            if (fontFile.read(static_cast<char *>(fontData), bytes))
+                io.FontDefault = io.Fonts->AddFontFromMemoryTTF(fontData, bytes, 16.0f);
+            else
+                ImGui::MemFree(fontData);
+        }
+    }
     ImGui::StyleColorsDark();
 
     // Shared installer chrome, spacing and button hierarchy.
@@ -690,16 +703,41 @@ bool runWizardWindow(WizardConfig &config)
                     ImGui::TextWrapped("Update if needed and play from this folder. No ISO needed.");
                     const auto path = pathText(destination.destination);
                     const ImVec2 padding(12, 9);
-                    const float wrapWidth = ImGui::GetContentRegionAvail().x - 2 * padding.x;
-                    const float panelHeight = ImGui::GetTextLineHeightWithSpacing() +
-                        ImGui::CalcTextSize(path.c_str(), nullptr, false, wrapWidth).y + 2 * padding.y + 2;
+                    const bool canChangeFolder = !destination.explicitOverride;
+                    const float folderButtonWidth = 36.0f;
+                    const float reserved = canChangeFolder ? folderButtonWidth + gap : 0.0f;
+                    const float wrapWidth = ImGui::GetContentRegionAvail().x - 2 * padding.x - reserved - 2;
+                    const float contentHeight = ImGui::GetTextLineHeightWithSpacing() +
+                        ImGui::CalcTextSize(path.c_str(), nullptr, false, wrapWidth).y;
+                    const float panelHeight = std::max(contentHeight, canChangeFolder ? folderButtonWidth : 0.0f)
+                        + 2 * padding.y + 2;
                     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, padding);
                     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
                     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.14f, 0.17f, 0.21f, 1.0f));
                     ImGui::BeginChild("DetectedFolder", ImVec2(0, panelHeight),
                                       ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+                    const float folderButtonX = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - folderButtonWidth;
+                    ImGui::BeginGroup();
                     ImGui::TextDisabled("Installation folder");
-                    ImGui::TextWrapped("%s", path.c_str());
+                    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrapWidth);
+                    ImGui::TextUnformatted(path.c_str());
+                    ImGui::PopTextWrapPos();
+                    ImGui::EndGroup();
+                    if (canChangeFolder) {
+                        ImGui::SameLine(folderButtonX);
+                        if (ImGui::Button("##ChangeInstallationFolder", ImVec2(folderButtonWidth, folderButtonWidth)))
+                            browseExisting();
+                        if (ImGui::IsItemHovered() || ImGui::IsItemFocused())
+                            ImGui::SetTooltip("Change installation folder");
+                        const auto origin = ImGui::GetItemRectMin();
+                        const float x = origin.x + 9.0f, y = origin.y + 11.0f;
+                        const ImVec2 outline[] = {
+                            {x, y + 14}, {x, y}, {x + 7, y}, {x + 10, y + 3},
+                            {x + 18, y + 3}, {x + 18, y + 14}
+                        };
+                        ImGui::GetWindowDrawList()->AddPolyline(outline, 6,
+                            ImGui::GetColorU32(ImGuiCol_Text), ImDrawFlags_Closed, 1.5f);
+                    }
                     ImGui::EndChild();
                     ImGui::PopStyleColor();
                     ImGui::PopStyleVar(2);
@@ -708,16 +746,11 @@ bool runWizardWindow(WizardConfig &config)
                 showError(actionError);
                 ImGui::Spacing();
                 if (!importing) {
-                    if (link("Manage installation")) {
+                    if (ImGui::Button("Manage installation", ImVec2(0, 32))) {
                         config.manageOnly = true;
                         returnToExisting = true;
                         actionError.clear();
                         page = Page::Manage;
-                    }
-                    if (!destination.explicitOverride) {
-                        ImGui::SameLine();
-                        if (link("Choose another installed folder..."))
-                            openOptions();
                     }
                 }
                 const char *primary = copyFromManagement ? "Copy installation" : importing ? "Copy & Play" :
