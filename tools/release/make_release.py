@@ -76,10 +76,11 @@ Updating and existing installations
 
 Migration from an older release
   Older releases may have flat installation folders or use %LOCALAPPDATA%/DW5E.
-  Choose the existing installation, then Import into game-files to copy its installed
-  game, build dependencies and saves/settings. Keep the original as a backup.
-  The new release sources/tools are preserved. Import does not delete the original.
-  Console equivalent: --import-installation <old-folder> --no-window.
+  For a normal update, Use this installation keeps playing from the current folder.
+  For another drive or PC, open Manage installation and choose Copy installation
+  beside this launcher. It shows the destination and keeps the original as a backup.
+  Choose Portable to keep saves and settings with the copy. No ISO is needed.
+  Console equivalent: --manage --import-installation <old-folder> --no-window.
 
 Controls (Default Xbox 360 Gamepad / Keyboard):
   A / Space       - Jump
@@ -142,10 +143,12 @@ Updating and existing installations
 
 Migration from an older release
   Older releases may use a flat directory or ~/.local/share/dw5e.
-  Use existing installation and Import into game-files to copy installed files and
-  saves/settings, keeping the original as a backup. New release sources/tools remain.
-  Import does not delete the original. Console: --import-installation <old-folder>
-  --no-window. Keep dw5e-install.json when updating custom folder choices.
+  For a normal update, Use this installation keeps playing from the current folder.
+  For another drive or PC, open Manage installation and choose Copy installation
+  beside this AppImage. It shows the destination and keeps the original as a backup.
+  Choose Portable to keep saves and settings with the copy. No ISO is needed.
+  Console: --manage --import-installation <old-folder> --no-window.
+  Keep dw5e-install.json when updating custom folder choices.
 
 """
 

@@ -232,7 +232,7 @@ bool runWizardWindow(WizardConfig &config)
     auto existingDialog = std::make_shared<DialogState>();
     char destinationBuf[32768] = {};
     std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
-    enum class Page { Saves, Disc, Existing, Other, Manage };
+    enum class Page { Saves, Disc, Existing, Other, Manage, Copied };
     const auto hasDisc = [&] { return installState(destination.destination) == InstallState::Installed; };
     Page page = config.manageOnly ? Page::Manage
               : !config.importSource.empty() ? Page::Saves
@@ -245,6 +245,13 @@ bool runWizardWindow(WizardConfig &config)
         page = Page::Other;
     };
     std::string actionError;
+    bool returnToExisting = false;
+    bool copyFromManagement = false;
+#ifdef _WIN32
+    const char *copyLabel = "Copy installation beside this launcher";
+#else
+    const char *copyLabel = "Copy installation beside this AppImage";
+#endif
     const auto selectDestination = [&](const fs::path &path) {
         if (!destination.choose(path))
             return false;
@@ -338,7 +345,10 @@ bool runWizardWindow(WizardConfig &config)
                 destination.error.clear();
             } else if (config.manageOnly) {
                 succeeded = true;
-                quit = true;
+                if (copyFromManagement)
+                    page = Page::Copied;
+                else
+                    quit = true;
             } else {
                 config.importSource.clear();
                 actionError.clear();
@@ -434,8 +444,15 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::TextWrapped("Original saves are retained. The destination is locked until this finishes.");
                 if(closeAfterPreparation) ImGui::TextWrapped("Closing after the current safe copy finishes.");
             }
+            else if (!activeRun && page == Page::Copied) {
+                ImGui::TextUnformatted("Installation copied");
+                ImGui::TextWrapped("%s", pathText(destination.destination).c_str());
+                ImGui::TextWrapped("Open this launcher to play from the new copy. Your original installation is still in place.");
+                if (ImGui::Button("Done", ImVec2(100, 36)))
+                    quit = true;
+            }
             else if (!activeRun && page == Page::Manage) {
-                ImGui::TextUnformatted("Manage save location");
+                ImGui::TextUnformatted("Manage installation");
                 ImGui::TextWrapped("%s", pathText(destination.destination).c_str());
                 Installation current;
                 std::string metadataError;
@@ -458,23 +475,62 @@ bool runWizardWindow(WizardConfig &config)
                     beginPreparation();
                 ImGui::EndDisabled();
                 ImGui::SameLine();
-                if (ImGui::Button("Close", ImVec2(100, 36)))
-                    quit = true;
+                if (ImGui::Button(returnToExisting ? "Back" : "Close", ImVec2(100, 36))) {
+                    if (returnToExisting) {
+                        config.manageOnly = false;
+                        config.modeChosen = false;
+                        config.conflict = SaveConflict::Ask;
+                        actionError.clear();
+                        returnToExisting = false;
+                        page = Page::Existing;
+                    } else {
+                        quit = true;
+                    }
+                }
+                const auto copyDestination = config.launcherDir / "game-files";
+                if (canManage && !destination.explicitOverride && !config.launcherDir.empty() &&
+                    destination.destination != copyDestination &&
+                    installState(copyDestination) != InstallState::Installed) {
+                    ImGui::Separator();
+                    ImGui::TextWrapped("Taking DW5E to another drive or PC? Make a second copy of this installation.");
+                    if (ImGui::Button(copyLabel)) {
+                        const auto source = destination.destination;
+                        if (selectDestination(copyDestination)) {
+                            config.importSource = source;
+                            config.modeChosen = false;
+                            config.conflict = SaveConflict::Ask;
+                            copyFromManagement = true;
+                            page = Page::Saves;
+                        }
+                    }
+                }
                 if (!canManage && !destination.explicitOverride &&
                     ImGui::SmallButton("Choose installation..."))
                     openOptions();
             }
             else if (!activeRun && page == Page::Saves) {
-                ImGui::TextDisabled(config.importSource.empty() ? "Step 1 of 2" : "Import installation");
-                ImGui::TextUnformatted("Where should saves and settings be stored?");
+                ImGui::TextDisabled(config.importSource.empty() ? "Step 1 of 2" : "Copy installation");
+                ImGui::TextUnformatted(copyFromManagement ? "Where should the copy keep its saves?"
+                                                         : "Where should saves and settings be stored?");
                 chooseMode(SaveMode::Normal);
+                if (copyFromManagement)
+                    ImGui::TextWrapped("Choose Portable if you want saves and settings to travel with the copy.");
                 showError(actionError);
                 ImGui::Spacing();
                 if (ImGui::Button("Continue", ImVec2(160, 36))) {
                     config.modeChosen = true;
                     page = config.importSource.empty() ? Page::Disc : Page::Existing;
                 }
-                if (!destination.explicitOverride && config.importSource.empty()) {
+                if (copyFromManagement) {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Back", ImVec2(100, 36)) && selectDestination(config.importSource)) {
+                        config.importSource.clear();
+                        config.modeChosen = false;
+                        config.conflict = SaveConflict::Ask;
+                        copyFromManagement = false;
+                        page = Page::Manage;
+                    }
+                } else if (!destination.explicitOverride && config.importSource.empty()) {
                     ImGui::SameLine();
                     if (ImGui::Button("Other options", ImVec2(120, 36)))
                         openOptions();
@@ -483,19 +539,23 @@ bool runWizardWindow(WizardConfig &config)
             }
             else if (!activeRun && page == Page::Existing) {
                 const bool importing = !config.importSource.empty();
-                ImGui::TextUnformatted(importing ? "Import your existing installation" : "We found your DW5E installation");
-                ImGui::TextWrapped("%s", pathText(importing ? config.importSource : destination.destination).c_str());
+                ImGui::TextUnformatted(importing ? copyLabel : "We found your DW5E installation");
                 if (importing) {
-                    ImGui::TextWrapped("Copy into %s. Your original installation will be kept.",
-                                       pathText(destination.destination).c_str());
+                    ImGui::TextWrapped("From: %s", pathText(config.importSource).c_str());
+                    ImGui::TextWrapped("To: %s", pathText(destination.destination).c_str());
+                    ImGui::TextWrapped("This creates a second copy. Your current installation stays where it is. No ISO needed.");
                     chooseConflict();
+                } else {
+                    ImGui::TextWrapped("%s", pathText(destination.destination).c_str());
+                    ImGui::TextWrapped("Update if needed and play from this folder. No ISO needed.");
                 }
-                ImGui::TextWrapped("Setup will use the installed game files.");
                 showError(destination.error);
                 showError(actionError);
                 ImGui::Spacing();
                 ImGui::BeginDisabled(!destination.error.empty());
-                if (ImGui::Button(importing ? "Import & Play" : "Use this installation", ImVec2(180, 36))) {
+                const char *primary = copyFromManagement ? "Copy installation"
+                                      : importing ? "Copy & Play" : "Use this installation";
+                if (ImGui::Button(primary, ImVec2(180, 36))) {
                     config.base.discIso.clear();
                     beginPreparation();
                 }
@@ -510,6 +570,12 @@ bool runWizardWindow(WizardConfig &config)
                         openOptions();
                 }
                 exitButton();
+                if (!importing && ImGui::SmallButton("Manage installation")) {
+                    config.manageOnly = true;
+                    returnToExisting = true;
+                    actionError.clear();
+                    page = Page::Manage;
+                }
             }
             else if (!activeRun && page == Page::Other) {
                 ImGui::TextUnformatted(config.manageOnly ? "Choose an installation to manage" : "Installation options");
@@ -533,17 +599,6 @@ bool runWizardWindow(WizardConfig &config)
                     browseExisting();
                 if (!config.manageOnly) {
                     const auto defaultFolder = config.launcherDir / "game-files";
-                    if (hasDisc() && destination.destination != defaultFolder &&
-                        installState(defaultFolder) != InstallState::Installed &&
-                        ImGui::Button("Import into game-files")) {
-                        const auto source = destination.destination;
-                        if (selectDestination(defaultFolder)) {
-                            config.importSource = source;
-                            config.modeChosen = false;
-                            config.conflict = SaveConflict::Ask;
-                            page = Page::Saves;
-                        }
-                    }
                     if (ImGui::Button("Start a new installation")) {
                         config.importSource.clear();
                         config.modeChosen = false;

@@ -43,7 +43,7 @@ First setup offers **On this PC (recommended)** or **With the game (portable)** 
 
 Use **Manage installation** (`--manage`, or hold Shift while opening the Windows launcher) to switch mode with the game closed. Saves/settings/achievements are copied and verified, originals are retained, and conflicting progress requires an explicit choice. Updates preserve `game-files`, installation metadata and user data. A fresh download checks local/recorded/nearby installations and offers **Use existing installation** when needed; multiple candidates require selection. There are no registry entries or whole-drive scans.
 
-For a legacy flat/AppData installation, **Import into game-files** copies the installed game, dependencies and user data while keeping the original as a backup. Rebuilds reuse installed files without an ISO. Console management supports `--save-mode normal|portable`, `--save-conflict source|destination`, `--import-installation <folder>` and read-only `--status`.
+To take an existing installation to another drive or PC, open **Manage installation** and choose **Copy installation beside this launcher** (or **beside this AppImage**). The wizard shows the destination, keeps the original as a backup, and reuses the installed files without an ISO. Choose **Portable** to keep saves and settings with the copy. For an ordinary update, **Use this installation** keeps playing from the current folder. Console management supports `--save-mode normal|portable`, `--save-conflict source|destination`, `--manage --import-installation <folder>` and read-only `--status`.
 
 ## Controls
 

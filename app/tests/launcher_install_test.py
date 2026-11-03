@@ -368,6 +368,28 @@ class LauncherInstallTests(unittest.TestCase):
         self.assertFalse((selected / 'generated').exists())
         self.assertFalse((self.reports / 'configure.json').exists())
 
+    def test_manage_copies_portable_installation_without_launching(self):
+        source = self.root / 'old installation ø'
+        self.installed(source)
+        put(source / 'build/dw5e.toml', 'original settings')
+        put(source / 'build/built-from.txt', 'old release')
+        original = hashes(source)
+
+        self.launch('--manage', '--no-window', '--import-installation', source,
+                    '--save-mode', 'portable')
+
+        copied = self.package / 'game-files'
+        self.assertEqual(hashes(source), original)
+        self.assertEqual((copied / 'game/files/default.xex').read_bytes(),
+                         (source / 'game/files/default.xex').read_bytes())
+        self.assertEqual((copied / 'user-data/save/sentinel').read_bytes(),
+                         (source / 'save/sentinel').read_bytes())
+        self.assertEqual((copied / 'user-data/dw5e.toml').read_bytes(),
+                         (source / 'build/dw5e.toml').read_bytes())
+        self.assertEqual(json.loads((copied / 'install.json').read_text())['save_mode'], 'portable')
+        self.assertEqual((copied / 'build/built-from.txt').read_text().strip(), 'old release')
+        self.assertFalse((self.reports / 'configure.json').exists(), 'copy does not rebuild')
+
     def normal_paths(self):
         if os.name == 'nt':
             return self.home/'DW5E/user-data', self.home/'DW5E/config'
