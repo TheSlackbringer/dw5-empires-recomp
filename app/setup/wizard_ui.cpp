@@ -236,6 +236,7 @@ bool runWizardWindow(WizardConfig &config)
     style.FrameRounding = 5.0f;
     style.WindowPadding = ImVec2(20, 14);
     style.ItemSpacing = ImVec2(9, 9);
+    style.FramePadding = ImVec2(12, 7);
     style.Colors[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.11f, 0.13f, 1.0f);
     style.Colors[ImGuiCol_Header] = ImVec4(0.20f, 0.25f, 0.32f, 1.0f);
     style.Colors[ImGuiCol_Button] = ImVec4(0.19f, 0.22f, 0.27f, 1.0f);
@@ -254,9 +255,11 @@ bool runWizardWindow(WizardConfig &config)
 
     DialogState dialogState;
     auto folderDialog = std::make_shared<DialogState>();
-    auto existingDialog = std::make_shared<DialogState>();
-    char destinationBuf[32768] = {};
-    std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
+    char folderInput[32768] = {};
+    std::string folderError;
+    std::string checkedFolder;
+    fs::path folderChoice;
+    bool createFolder = false;
     enum class Page { Saves, Disc, Existing, Other, Manage, Uninstall, Uninstalled, Copied, Saved, PreparationFailed };
     const auto hasDisc = [&] { return installState(destination.destination) == InstallState::Installed; };
     Installation initialInstallation;
@@ -270,6 +273,13 @@ bool runWizardWindow(WizardConfig &config)
               : savedMode || config.modeChosen || config.launcherDir.empty() ? Page::Disc : Page::Saves;
     Page returnFromOptions = page;
     const auto openOptions = [&] {
+        folderDialog = std::make_shared<DialogState>();
+        folderError.clear();
+        checkedFolder.clear();
+        folderChoice.clear();
+        createFolder = false;
+        const auto path = page == Page::Saves ? std::string{} : pathText(destination.destination);
+        std::snprintf(folderInput, sizeof(folderInput), "%s", path.c_str());
         returnFromOptions = page;
         page = Page::Other;
     };
@@ -289,7 +299,6 @@ bool runWizardWindow(WizardConfig &config)
             return false;
         actionError.clear();
         saveConfirmation.clear();
-        std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
         return true;
     };
     std::unique_ptr<SetupRun> activeRun;
@@ -339,36 +348,14 @@ bool runWizardWindow(WizardConfig &config)
         {
             std::lock_guard<std::mutex> lock(folderDialog->mutex);
             if (folderDialog->hasResult) {
-                if (!activeRun && !preparation && selectDestination(pathFromText(folderDialog->selectedFile))) {
-                    if (hasDisc()) {
-                        config.modeChosen = false;
-                        config.importSource.clear();
-                        page = Page::Existing;
-                    } else if (page == Page::Other) {
-                        page = Page::Saves;
-                    }
+                if (page == Page::Other && !activeRun && !preparation) {
+                    std::snprintf(folderInput, sizeof(folderInput), "%s", folderDialog->selectedFile.c_str());
+                    checkedFolder.clear();
                 }
                 folderDialog->hasResult = false;
             }
         }
 
-        {
-            std::lock_guard<std::mutex> lock(existingDialog->mutex);
-            if (existingDialog->hasResult) {
-                if (!activeRun && !preparation) {
-                    const auto existing = existingInstallationRoot(pathFromText(existingDialog->selectedFile));
-                    if (existing.empty())
-                        actionError = "Choose a folder containing a verified DW5E installation.";
-                    else if (selectDestination(existing)) {
-                        config.modeChosen = false;
-                        config.importSource.clear();
-                        config.conflict = SaveConflict::Ask;
-                        page = config.manageOnly ? Page::Manage : Page::Existing;
-                    }
-                }
-                existingDialog->hasResult = false;
-            }
-        }
         if (preparation && preparation->done.load(std::memory_order_acquire)) {
             const bool ok = preparation->ok;
             config = std::move(preparation->config);
@@ -545,13 +532,25 @@ bool runWizardWindow(WizardConfig &config)
                                        config.conflict == SaveConflict::KeepDestination))
                     config.conflict = SaveConflict::KeepDestination;
             };
-            const auto browseExisting = [&] {
-                SDL_ShowOpenFolderDialog(onFolderDialog, new std::shared_ptr<DialogState>(existingDialog),
+            const auto browseFolder = [&] {
+                folderDialog = std::make_shared<DialogState>();
+                SDL_ShowOpenFolderDialog(onFolderDialog, new std::shared_ptr<DialogState>(folderDialog),
                                          window, nullptr, false);
             };
-            const auto browseDestination = [&] {
-                SDL_ShowOpenFolderDialog(onFolderDialog, new std::shared_ptr<DialogState>(folderDialog),
-                                         window, destinationBuf, false);
+            const auto folderButton = [&](const char *id, const char *tooltip) {
+                const bool pressed = ImGui::Button(id, ImVec2(buttonHeight, buttonHeight));
+                if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+                    ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    ImGui::SetTooltip("%s", tooltip);
+                const auto origin = ImGui::GetItemRectMin();
+                const float x = origin.x + 9.0f, y = origin.y + 11.0f;
+                const ImVec2 outline[] = {
+                    {x, y + 14}, {x, y}, {x + 7, y}, {x + 10, y + 3},
+                    {x + 18, y + 3}, {x + 18, y + 14}
+                };
+                ImGui::GetWindowDrawList()->AddPolyline(outline, 6,
+                    ImGui::GetColorU32(ImGuiCol_Text), ImDrawFlags_Closed, 1.5f);
+                return pressed;
             };
             if (!config.layoutError.empty())
             {
@@ -725,18 +724,8 @@ bool runWizardWindow(WizardConfig &config)
                     ImGui::EndGroup();
                     if (canChangeFolder) {
                         ImGui::SameLine(folderButtonX);
-                        if (ImGui::Button("##ChangeInstallationFolder", ImVec2(folderButtonWidth, folderButtonWidth)))
-                            browseExisting();
-                        if (ImGui::IsItemHovered() || ImGui::IsItemFocused())
-                            ImGui::SetTooltip("Change installation folder");
-                        const auto origin = ImGui::GetItemRectMin();
-                        const float x = origin.x + 9.0f, y = origin.y + 11.0f;
-                        const ImVec2 outline[] = {
-                            {x, y + 14}, {x, y}, {x + 7, y}, {x + 10, y + 3},
-                            {x + 18, y + 3}, {x + 18, y + 14}
-                        };
-                        ImGui::GetWindowDrawList()->AddPolyline(outline, 6,
-                            ImGui::GetColorU32(ImGuiCol_Text), ImDrawFlags_Closed, 1.5f);
+                        if (folderButton("##ChangeInstallationFolder", "Change installation folder"))
+                            openOptions();
                     }
                     ImGui::EndChild();
                     ImGui::PopStyleColor();
@@ -746,7 +735,7 @@ bool runWizardWindow(WizardConfig &config)
                 showError(actionError);
                 ImGui::Spacing();
                 if (!importing) {
-                    if (ImGui::Button("Manage installation", ImVec2(0, 32))) {
+                    if (ImGui::Button("Manage installation", ImVec2(0, buttonHeight))) {
                         config.manageOnly = true;
                         returnToExisting = true;
                         actionError.clear();
@@ -767,33 +756,99 @@ bool runWizardWindow(WizardConfig &config)
                 }
             }
             else if (!activeRun && page == Page::Other) {
-                ImGui::TextUnformatted(config.manageOnly ? "Choose an installation to manage" : "Find an existing installation");
+                const bool newDestination = returnFromOptions == Page::Disc;
+                ImGui::TextUnformatted(newDestination ? "Change installation folder" : "Choose an installed DW5E folder");
+                ImGui::TextWrapped("%s", newDestination
+                    ? "Choose where DW5E should install its game files."
+                    : "Enter or browse to a folder where DW5E is already installed.");
                 showError(destination.error);
-                showError(actionError);
                 ImGui::BeginDisabled(destination.explicitOverride);
-                for (size_t i = 0; i < config.discovered.size(); ++i) {
-                    if (config.discovered[i] == destination.destination && returnFromOptions == Page::Existing)
-                        continue;
-                    ImGui::PushID(static_cast<int>(i));
-                    ImGui::TextWrapped("%s", pathText(config.discovered[i]).c_str());
-                    if (ImGui::SmallButton("Use this installation") && selectDestination(config.discovered[i])) {
-                        config.importSource.clear();
-                        config.modeChosen = false;
-                        config.conflict = SaveConflict::Ask;
-                        page = config.manageOnly ? Page::Manage : Page::Existing;
+                ImGui::TextDisabled("Installation folder");
+                ImGui::SetNextItemWidth(-buttonHeight - gap);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12, (buttonHeight - ImGui::GetFontSize()) / 2));
+                ImGui::InputText("##InstallationFolderPath", folderInput, sizeof(folderInput));
+                ImGui::PopStyleVar();
+                ImGui::SameLine();
+                if (folderButton("##BrowseInstallationFolder", "Browse for a folder"))
+                    browseFolder();
+
+                const auto checkFolder = [&] {
+                    checkedFolder = folderInput;
+                    folderChoice.clear();
+                    folderError.clear();
+                    createFolder = false;
+                    if (checkedFolder.empty())
+                        return;
+                    auto path = pathFromText(checkedFolder);
+                    if (!path.is_absolute())
+                        path = config.launcherDir / path;
+                    std::error_code ec;
+                    const auto status = fs::status(path, ec);
+                    if (ec && ec != std::errc::no_such_file_or_directory) {
+                        folderError = "Cannot read this folder: " + pathText(path);
+                    } else if (!fs::exists(status)) {
+                        if (newDestination) {
+                            createFolder = true;
+                            folderChoice = path;
+                        } else {
+                            folderError = "This folder does not exist: " + pathText(path);
+                        }
+                    } else if (!fs::is_directory(status)) {
+                        folderError = "This path is a file. Choose a folder.";
+                    } else if (auto existing = existingInstallationRoot(path); !existing.empty()) {
+                        folderChoice = existing;
+                    } else if (newDestination && installState(path) != InstallState::Installed) {
+                        folderChoice = path;
+                    } else {
+                        folderError = "This folder exists, but no verified DW5E installation was found.";
                     }
-                    ImGui::PopID();
+                };
+                if (checkedFolder != folderInput)
+                    checkFolder();
+                showError(folderError);
+                if (createFolder)
+                    ImGui::TextWrapped("This folder does not exist yet. DW5E will create it when you start installation.");
+
+                const auto chooseExisting = [&](const fs::path &existing) {
+                    if (!selectDestination(existing))
+                        return;
+                    config.importSource.clear();
+                    config.modeChosen = false;
+                    config.conflict = SaveConflict::Ask;
+                    page = config.manageOnly ? Page::Manage : Page::Existing;
+                };
+                if (!newDestination) {
+                    for (size_t i = 0; i < config.discovered.size(); ++i) {
+                        if (config.discovered[i] == destination.destination && returnFromOptions == Page::Existing)
+                            continue;
+                        ImGui::PushID(static_cast<int>(i));
+                        ImGui::TextWrapped("%s", pathText(config.discovered[i]).c_str());
+                        if (ImGui::Button("Use this installation", ImVec2(0, buttonHeight))) {
+                            const auto existing = existingInstallationRoot(config.discovered[i]);
+                            if (!existing.empty())
+                                chooseExisting(existing);
+                            else
+                                folderError = "This installation is no longer available.";
+                        }
+                        ImGui::PopID();
+                    }
                 }
-                ImGui::TextWrapped("Already installed DW5E somewhere else? Select its installation folder. No ISO needed.");
-                const float optionWidth = ImGui::CalcTextSize("Choose an installed DW5E folder...").x +
-                                          2 * ImGui::GetStyle().FramePadding.x;
-                const ImVec2 optionSize(optionWidth, buttonHeight);
-                if (ImGui::Button("Choose an installed DW5E folder...", optionSize))
-                    browseExisting();
                 ImGui::EndDisabled();
-                ImGui::Spacing();
-                if (footer(returnFromOptions != Page::Other ? "Back" : nullptr).back)
+                const auto actions = footer(returnFromOptions != Page::Other ? "Back" : nullptr,
+                                            createFolder ? "Use new folder" : "Use this folder",
+                                            !destination.explicitOverride && !folderChoice.empty());
+                if (actions.back)
                     page = returnFromOptions;
+                if (actions.primary) {
+                    const bool alreadyAcknowledged = createFolder;
+                    checkFolder();
+                    if (!folderChoice.empty() && (!createFolder || alreadyAcknowledged)) {
+                        if (installState(folderChoice) == InstallState::Installed)
+                            chooseExisting(folderChoice);
+                        else if (newDestination && selectDestination(folderChoice))
+                            page = Page::Disc;
+                    }
+                }
             }
             else if (!activeRun)
             {
@@ -834,10 +889,14 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::Spacing();
 
                 ImGui::Text("Disc Image (.iso):");
-                ImGui::SetNextItemWidth(-80);
+                const float browseWidth = ImGui::CalcTextSize("Browse...").x +
+                    2 * ImGui::GetStyle().FramePadding.x;
+                ImGui::SetNextItemWidth(-browseWidth - gap);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12, (buttonHeight - ImGui::GetFontSize()) / 2));
                 ImGui::InputText("##IsoPath", isoPathBuf, sizeof(isoPathBuf));
+                ImGui::PopStyleVar();
                 ImGui::SameLine();
-                if (ImGui::Button("Browse..."))
+                if (ImGui::Button("Browse...", ImVec2(browseWidth, buttonHeight)))
                 {
 #ifdef _WIN32
                     OPENFILENAMEW ofn = {};
@@ -892,9 +951,10 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::Spacing();
 
                 if (!config.launcherDir.empty() || destination.explicitOverride) {
-                    ImGui::TextWrapped("Install to: %s", destinationBuf);
-                    if (!destination.explicitOverride && ImGui::SmallButton("Change folder..."))
-                        browseDestination();
+                    ImGui::TextWrapped("Install to: %s", pathText(destination.destination).c_str());
+                    if (!destination.explicitOverride &&
+                        ImGui::Button("Change folder...", ImVec2(0, buttonHeight)))
+                        openOptions();
                 }
                 showError(destination.error);
                 showError(actionError);
