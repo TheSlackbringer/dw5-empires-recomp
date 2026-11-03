@@ -290,11 +290,15 @@ jobs:
           if ($package.Count -ne 1) { throw 'Expected one package root' }
           python tools/release/verify_package.py --root $package[0].FullName --platform windows --smoke
           if ($LASTEXITCODE -ne 0) { throw 'Native Windows packaged tools failed' }
+          # The release keeps the runtime DLLs inside game-files. The test
+          # executables below run from the package root.
+          $runtimeBin = Join-Path $package[0].FullName 'game-files/tools/llvm-mingw/bin'
+          $env:PATH = "$runtimeBin;$env:PATH"
           Get-ChildItem artifacts/tests -Recurse -File |
             Where-Object Extension -In '.exe', '.dll' |
             ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $package[0].FullName }
           & (Join-Path $package[0].FullName 'dw5e_setup_test.exe')
-          if ($LASTEXITCODE -ne 0) { throw 'Setup unit tests failed' }
+          if ($LASTEXITCODE -ne 0) { throw "Setup unit tests failed (exit $LASTEXITCODE)" }
           & (Join-Path $package[0].FullName 'dw5e_setup_reliability_test.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Setup reliability tests failed' }
           & (Join-Path $package[0].FullName 'dw5e_storage_policy_test.exe')
@@ -311,9 +315,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Guest frame statistics tests failed' }
           & (Join-Path $package[0].FullName 'dw5e_frame_timing_test.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Frame timing tests failed' }
-          python app/tests/launcher_install_test.py --launcher (Join-Path $package[0].FullName 'game-files/launcher/DW5E.exe') --game (Join-Path $package[0].FullName 'dw5e_install_fake_game.exe') --selection-driver (Join-Path $package[0].FullName 'dw5e_launcher_selection_driver.exe') --runtime-bin (Join-Path $package[0].FullName 'game-files/tools/llvm-mingw/bin') --out artifacts/portable-install-tests
+          python app/tests/launcher_install_test.py --launcher (Join-Path $package[0].FullName 'game-files/launcher/DW5E.exe') --game (Join-Path $package[0].FullName 'dw5e_install_fake_game.exe') --selection-driver (Join-Path $package[0].FullName 'dw5e_launcher_selection_driver.exe') --runtime-bin $runtimeBin --out artifacts/portable-install-tests
           if ($LASTEXITCODE -ne 0) { throw 'Portable launcher integration tests failed' }
-          python app/tests/bootstrap_test.py --bootstrap (Join-Path $package[0].FullName 'DW5E.exe') --child (Join-Path $package[0].FullName 'dw5e_install_fake_game.exe') --runtime-bin (Join-Path $package[0].FullName 'game-files/tools/llvm-mingw/bin') --out artifacts/bootstrap-tests
+          python app/tests/bootstrap_test.py --bootstrap (Join-Path $package[0].FullName 'DW5E.exe') --child (Join-Path $package[0].FullName 'dw5e_install_fake_game.exe') --runtime-bin $runtimeBin --out artifacts/bootstrap-tests
           if ($LASTEXITCODE -ne 0) { throw 'Native bootstrap tests failed' }
           & (Join-Path $package[0].FullName 'dw5e_safe_read_test.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Snapshot safe-read tests failed' }
