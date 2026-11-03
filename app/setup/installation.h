@@ -43,9 +43,10 @@ void configureSaveMode(Installation &installation, SaveMode mode);
 std::filesystem::path existingInstallationRoot(const std::filesystem::path &selected);
 bool saveInstallation(const Installation &installation, std::string &error);
 bool prepareInstallation(Installation &installation, std::string &error);
-bool rememberNormalInstallation(const Installation &installation, std::string &error);
+bool rememberNormalInstallation(const Installation &installation, std::string &error,
+                                bool makePreferred = false);
 bool discoverInstallations(const std::filesystem::path &launcher, std::vector<std::filesystem::path> &found,
-                           std::string &error);
+                           std::string &error, std::filesystem::path *preferred = nullptr);
 bool switchSaveMode(Installation &installation, SaveMode mode, SaveConflict conflict, std::string &error);
 bool importInstallation(const std::filesystem::path &source, Installation &destination, SaveConflict conflict,
                         std::string &error);

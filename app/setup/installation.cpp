@@ -388,7 +388,7 @@ bool saveInstallation(const Installation &installation, std::string &error)
         installation.root / "install.json",
         Json{{"version", 1}, {"save_mode", saveModeName(installation.mode)}}.dump(2) + "\n", error);
 }
-bool rememberNormalInstallation(const Installation &installation, std::string &error)
+bool rememberNormalInstallation(const Installation &installation, std::string &error, bool makePreferred)
 {
     if (installation.mode != SaveMode::Normal || installState(installation.root) != InstallState::Installed)
         return true;
@@ -410,12 +410,24 @@ bool rememberNormalInstallation(const Installation &installation, std::string &e
     auto &paths = json["installations"];
     if (!paths.is_array())
         return fail(file, "Invalid installation location list", error);
-    for (const auto &path : paths)
-        if (path.is_string() && samePath(pathFromText(path.get<std::string>()), installation.root))
+    std::string stored;
+    for (const auto &path : paths) {
+        if (path.is_string() && samePath(pathFromText(path.get<std::string>()), installation.root)) {
+            stored = path.get<std::string>();
+            break;
+        }
+    }
+    if (!stored.empty()) {
+        if (!makePreferred || (json.contains("preferred") && json["preferred"] == stored))
             return true;
-    if (paths.size() >= 128)
-        return fail(file, "Installation location list is full", error);
-    paths.push_back(pathText(resolvedPath(installation.root)));
+    } else {
+        if (paths.size() >= 128)
+            return fail(file, "Installation location list is full", error);
+        stored = pathText(resolvedPath(installation.root));
+        paths.push_back(stored);
+    }
+    if (makePreferred)
+        json["preferred"] = stored;
     return writeAtomicText(file, json.dump(2) + "\n", error);
 }
 bool prepareInstallation(Installation &installation, std::string &error)
@@ -434,10 +446,13 @@ bool prepareInstallation(Installation &installation, std::string &error)
     installation.recorded = true;
     return true;
 }
-bool discoverInstallations(const fs::path &launcher, std::vector<fs::path> &found, std::string &error)
+bool discoverInstallations(const fs::path &launcher, std::vector<fs::path> &found, std::string &error,
+                           fs::path *preferred)
 {
     found.clear();
     error.clear();
+    if (preferred)
+        preferred->clear();
     auto add = [&](const fs::path &root) {
         if (!verified(root))
             return;
@@ -463,6 +478,7 @@ bool discoverInstallations(const fs::path &launcher, std::vector<fs::path> &foun
         const auto paths = json.find("installations");
         if (paths == json.end() || !paths->is_array() || paths->size() > 128)
             return fail(file, "Invalid installation location list", error);
+        const auto savedPreference = json.find("preferred");
         for (const auto &path : *paths)
         {
             if (!path.is_string())
@@ -472,6 +488,8 @@ bool discoverInstallations(const fs::path &launcher, std::vector<fs::path> &foun
             if (text.empty() || text.find('\0') != std::string::npos || !root.is_absolute())
                 return fail(file, "Installation locations must be absolute paths", error);
             add(root);
+            if (preferred && savedPreference != json.end() && *savedPreference == path && verified(root))
+                *preferred = resolvedPath(root);
         }
     }
     add(normalBase(false)); // Read-only recognition of pre-010 installations.

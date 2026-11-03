@@ -65,9 +65,9 @@ Saves and settings
 Updating and existing installations
   Replace release program files in the existing folder. Keep installed game files,
   install.json and user-data; release ZIPs never include or replace player saves.
-  A fresh ZIP checks local files, recorded locations and nearby release folders.
-  Use existing installation lets you select the old folder when it cannot be found;
-  multiple matching installations require a choice. Existing mode and saves are reused.
+  A fresh ZIP checks beside the launcher, then uses the last recorded installation
+  if available. If several copies are found without a preference, choose one.
+  You can browse for a different installed folder. Its save mode and saves are reused.
   A required rebuild uses installed game files without another ISO extraction.
   Portable users should carry the complete launcher/game-files folder together.
   Console: --data-dir <folder>, DW5E_DATA_DIR, --use-installation <folder>,
@@ -132,9 +132,9 @@ Saves and settings
 
 Updating and existing installations
   Replace the AppImage, keeping game-files, user-data and installation metadata.
-  A fresh download checks local files, recorded locations and nearby release folders.
-  Use existing installation selects an old installation when discovery cannot find it.
-  Multiple matches require a choice; updates retain the existing mode and saves.
+  A fresh AppImage checks beside itself, then uses the last recorded installation
+  if available. If several copies are found without a preference, choose one.
+  You can browse for a different installed folder. Its save mode and saves are reused.
   Rebuilds use installed game files without another ISO. The launcher waits for the game
   so the AppImage remains mounted; its writable builder stays outside the mount.
   Console: --data-dir <folder>, DW5E_DATA_DIR, --use-installation <folder>,

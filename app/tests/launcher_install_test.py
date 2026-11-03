@@ -412,9 +412,12 @@ class LauncherInstallTests(unittest.TestCase):
     def expect_user(self, path, contents):
         self.expected_user[str(path.relative_to(self.home))] = hashlib.sha256(contents.encode('utf-8')).hexdigest()
 
-    def expect_index(self, roots):
+    def expect_index(self, roots, preferred=None):
         _, config = self.normal_paths()
-        contents = json.dumps({'version':1, 'installations':[p.resolve().as_posix() for p in roots]}, sort_keys=True, indent=2, ensure_ascii=False) + '\n'
+        index = {'version':1, 'installations':[p.resolve().as_posix() for p in roots]}
+        if preferred is not None:
+            index['preferred'] = preferred.resolve().as_posix()
+        contents = json.dumps(index, sort_keys=True, indent=2, ensure_ascii=False) + '\n'
         self.expect_user(config/'installations.json', contents)
 
     def test_normal_fresh_zip_and_portable_switch_preserve_progress(self):
@@ -426,7 +429,7 @@ class LauncherInstallTests(unittest.TestCase):
         put(user/save, 'normal progress');self.expect_user(user/save, 'normal progress')
         put(config/'dw5e.toml', 'settings bytes');self.expect_user(config/'dw5e.toml', 'settings bytes')
         self.check_game(self.launch(game=True), installed, user, config)
-        self.expect_index([installed])
+        self.expect_index([installed], installed)
         fresh = self.root/'fresh download ø'
         shutil.copytree(self.package, fresh, ignore=shutil.ignore_patterns('game-files','dw5e-install.json'))
         self.package=fresh;self.launcher=fresh/self.launcher.name;self.driver=fresh/self.driver.name
@@ -499,6 +502,29 @@ class LauncherInstallTests(unittest.TestCase):
         self.assertIn('Several existing',failed.stdout)
         self.assertFalse((self.package/'game-files/game').exists())
         self.check_game(self.launch('--use-installation',left,game=True),left)
+
+    def test_fresh_update_uses_the_last_used_installation(self):
+        left = self.root / 'older installation'
+        right = self.root / 'active installation'
+        for root in (left, right):
+            self.installed(root)
+            put(root / 'install.json', json.dumps({'version': 1, 'save_mode': 'normal'}))
+        user, config = self.normal_paths()
+
+        self.check_game(self.launch('--use-installation', left, game=True), left, user, config)
+        self.expect_index([left], left)
+        self.check_game(self.launch('--use-installation', right, game=True), right, user, config)
+        self.expect_index([left, right], right)
+
+        fresh = self.root / 'newly downloaded update'
+        shutil.copytree(self.package, fresh, ignore=shutil.ignore_patterns('dw5e-install.json', 'game-files'))
+        self.package = fresh
+        self.launcher = fresh / self.launcher.name
+        self.driver = fresh / self.driver.name
+        status = json.loads(self.launch('--status').stdout)
+        self.assertEqual(P(status['installation']), right)
+        self.check_game(self.launch(game=True), right, user, config)
+        self.assertFalse((fresh / 'game-files').exists())
 
     @unittest.skipIf(os.name == 'nt', 'Linux AppImage discovery and mount lifetime need a Linux native host')
     def test_original_appimage_and_mount_lifetime(self):

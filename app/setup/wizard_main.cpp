@@ -148,7 +148,9 @@ int main(int argc, char **argv)
         }
         else if (args.importSource.empty() && !explicitDestination && !fs::exists(launcher / "dw5e-install.json") &&
                  installState(data) != InstallState::Installed) {
-            if(!discoverInstallations(launcher, discovered, resolveError)) destinationError=resolveError;
+            fs::path preferred;
+            if(!discoverInstallations(launcher, discovered, resolveError, &preferred)) destinationError=resolveError;
+            else if(!preferred.empty()) { data=preferred; destinationError.clear(); }
             else if(discovered.size()==1) { data=discovered.front(); destinationError.clear(); }
             else if(discovered.size()>1) destinationError="Several existing DW5E installations were found. Choose one below.";
         }
@@ -190,7 +192,7 @@ int main(int argc, char **argv)
         }
         fs::create_directories(data / "logs", ec);
         if(ec) { std::cerr<<"Cannot create game logs at "<<pathText(data/"logs")<<std::endl; return 1; }
-        if(!rememberNormalInstallation(storage,destinationError)) { std::cerr<<destinationError<<std::endl;return 1; }
+        if(!rememberNormalInstallation(storage,destinationError,true)) { std::cerr<<destinationError<<std::endl;return 1; }
         const fs::path gameData = data / "game" / "files";
         std::vector<std::string> gameArgs = {
             "--game_data_root=" + pathText(gameData),
@@ -288,7 +290,7 @@ int main(int argc, char **argv)
         if(config.manageOnly) return 0;
         options = config.base;
         data = options.effectiveDataDir();
-        if(!loadInstallation(data,storage,destinationError) || !rememberNormalInstallation(storage,destinationError)) {
+        if(!loadInstallation(data,storage,destinationError) || !rememberNormalInstallation(storage,destinationError,args.noWindow)) {
             std::cerr<<destinationError<<std::endl;return 1;
         }
         if (!release.empty() && !config.launchExistingBuild && !markBuilt()) {
