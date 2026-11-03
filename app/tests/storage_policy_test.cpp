@@ -42,6 +42,9 @@ int main()
     auto scratch =
         fs::temp_directory_path() /
         ("dw5e_modes_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    // Windows temp paths can use short names (RUNNER~1), but installation roots are resolved.
+    fs::create_directories(scratch);
+    scratch = fs::canonical(scratch);
     env("LOCALAPPDATA", scratch / "home");
     env("HOME", scratch / "home");
     env("XDG_CONFIG_HOME", scratch / "config-home");
