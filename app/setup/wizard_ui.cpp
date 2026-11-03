@@ -552,30 +552,36 @@ bool runWizardWindow(WizardConfig &config)
                 showError(destination.error);
                 showError(actionError);
                 ImGui::Spacing();
+                constexpr float actionHeight = 36.0f;
+                const float rowEnd = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+                const auto nextAction = [&](const char *label, float width) {
+                    if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + width <= rowEnd)
+                        ImGui::SameLine();
+                    return ImGui::Button(label, ImVec2(width, actionHeight));
+                };
                 ImGui::BeginDisabled(!destination.error.empty());
                 const char *primary = copyFromManagement ? "Copy installation"
                                       : importing ? "Copy & Play" : "Use this installation";
-                if (ImGui::Button(primary, ImVec2(180, 36))) {
+                if (ImGui::Button(primary, ImVec2(180, actionHeight))) {
                     config.base.discIso.clear();
                     beginPreparation();
                 }
                 ImGui::EndDisabled();
                 if (importing) {
-                    ImGui::SameLine();
-                    if (ImGui::Button("Back", ImVec2(100, 36)))
+                    if (nextAction("Back", 100))
                         page = Page::Saves;
-                } else if (!destination.explicitOverride) {
-                    ImGui::SameLine();
-                    if (ImGui::Button("Other options", ImVec2(120, 36)))
+                } else {
+                    if (nextAction("Manage installation", 165)) {
+                        config.manageOnly = true;
+                        returnToExisting = true;
+                        actionError.clear();
+                        page = Page::Manage;
+                    }
+                    if (!destination.explicitOverride && nextAction("Other options", 120))
                         openOptions();
                 }
-                exitButton();
-                if (!importing && ImGui::SmallButton("Manage installation")) {
-                    config.manageOnly = true;
-                    returnToExisting = true;
-                    actionError.clear();
-                    page = Page::Manage;
-                }
+                if (nextAction("Exit", 100))
+                    quit = true;
             }
             else if (!activeRun && page == Page::Other) {
                 ImGui::TextUnformatted(config.manageOnly ? "Choose an installation to manage" : "Installation options");
