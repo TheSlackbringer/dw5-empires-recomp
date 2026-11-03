@@ -41,6 +41,7 @@ std::filesystem::path normalConfigDirectory();
 bool loadInstallation(const std::filesystem::path &root, Installation &installation, std::string &error);
 void configureSaveMode(Installation &installation, SaveMode mode);
 std::filesystem::path existingInstallationRoot(const std::filesystem::path &selected);
+std::filesystem::path newInstallationRoot(const std::filesystem::path &selected);
 bool saveInstallation(const Installation &installation, std::string &error);
 bool prepareInstallation(Installation &installation, std::string &error);
 bool rememberNormalInstallation(const Installation &installation, std::string &error,

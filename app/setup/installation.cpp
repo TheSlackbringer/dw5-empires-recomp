@@ -344,7 +344,22 @@ fs::path existingInstallationRoot(const fs::path &selected)
         return resolvedPath(selected);
     if (verified(selected / "game-files"))
         return resolvedPath(selected / "game-files");
+    if (verified(selected / "DW5E"))
+        return resolvedPath(selected / "DW5E");
     return {};
+}
+fs::path newInstallationRoot(const fs::path &selected)
+{
+    const auto root = resolvedPath(selected);
+    const auto name = root.filename();
+    std::error_code ec;
+#ifdef _WIN32
+    const bool dedicated = _wcsicmp(name.c_str(), L"DW5E") == 0 ||
+                           _wcsicmp(name.c_str(), L"game-files") == 0;
+#else
+    const bool dedicated = name == "DW5E" || name == "game-files";
+#endif
+    return dedicated || fs::is_regular_file(root / "install.json", ec) ? root : root / "DW5E";
 }
 fs::path normalUserDataDirectory()
 {
@@ -475,6 +490,9 @@ bool discoverInstallations(const fs::path &launcher, std::vector<fs::path> &foun
     add(launcher);
     if (!found.empty())
         return true;
+    add(launcher / "DW5E");
+    if (!found.empty())
+        return true;
     const auto configDirectory = normalConfigDirectory();
     const auto file = configDirectory.empty() ? fs::path{} : configDirectory / "installations.json";
     std::error_code ec;
@@ -523,6 +541,7 @@ bool discoverInstallations(const fs::path &launcher, std::vector<fs::path> &foun
                 continue;
             ++inspected;
             add(it->path() / "game-files");
+            add(it->path() / "DW5E");
             add(it->path());
             const auto name = pathText(it->path().filename());
             if (name.starts_with("DW5E") || name.starts_with("dw5e"))

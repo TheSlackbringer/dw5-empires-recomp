@@ -49,6 +49,14 @@ int main()
     std::string error;
     Installation install;
     const auto root = scratch / pathFromText("release ø 測試") / "game-files";
+    const auto games = scratch / "Games";
+    fs::create_directories(games);
+    check(newInstallationRoot(games) == games / "DW5E", "custom folder gets a dedicated DW5E child");
+    check(newInstallationRoot(games / "DW5E") == games / "DW5E" && newInstallationRoot(root) == root,
+          "dedicated folders do not get nested");
+    installed(games / "DW5E");
+    check(existingInstallationRoot(games) == games / "DW5E", "find an existing DW5E child from its parent");
+    fs::remove(games / "DW5E/game/installed.txt");
     check(loadInstallation(root, install, error) && install.mode == SaveMode::Normal && !install.recorded,
           "new installation defaults to normal saves");
     check(install.userData == normalUserDataDirectory() && install.configDir == normalConfigDirectory(),

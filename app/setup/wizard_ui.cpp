@@ -781,20 +781,25 @@ bool runWizardWindow(WizardConfig &config)
                     const auto status = fs::status(path, ec);
                     if (ec && ec != std::errc::no_such_file_or_directory) {
                         folderError = "Cannot read this folder: " + pathText(path);
-                    } else if (!fs::exists(status)) {
-                        if (newDestination) {
-                            createFolder = true;
-                            folderChoice = path;
-                        } else {
-                            folderError = "This folder does not exist: " + pathText(path);
-                        }
-                    } else if (!fs::is_directory(status)) {
+                    } else if (fs::exists(status) && !fs::is_directory(status)) {
                         folderError = "This path is a file. Choose a folder.";
                     } else if (auto existing = existingInstallationRoot(path); !existing.empty()) {
                         folderChoice = existing;
                         folderHasInstallation = true;
                     } else if (newDestination && installState(path) != InstallState::Installed) {
-                        folderChoice = path;
+                        const auto target = destination.explicitOverride ? path : newInstallationRoot(path);
+                        ec.clear();
+                        const auto targetStatus = fs::status(target, ec);
+                        if ((ec && ec != std::errc::no_such_file_or_directory) ||
+                            (fs::exists(targetStatus) && !fs::is_directory(targetStatus)) ||
+                            installState(target) == InstallState::Installed) {
+                            folderError = "Cannot install to: " + pathText(target);
+                        } else {
+                            folderChoice = target;
+                            createFolder = !fs::exists(targetStatus);
+                        }
+                    } else if (!fs::exists(status)) {
+                        folderError = "This folder does not exist: " + pathText(path);
                     } else {
                         folderError = "This folder exists, but no verified DW5E installation was found.";
                     }
@@ -802,6 +807,8 @@ bool runWizardWindow(WizardConfig &config)
                 if (checkedFolder != folderInput)
                     checkFolder();
                 showError(folderError);
+                if (newDestination && !folderChoice.empty())
+                    ImGui::TextWrapped("Install to: %s", pathText(folderChoice).c_str());
                 if (createFolder)
                     ImGui::TextWrapped("This folder does not exist yet. DW5E will create it when you start installation.");
                 if (newDestination && folderHasInstallation)
@@ -967,7 +974,7 @@ bool runWizardWindow(WizardConfig &config)
                 showError(destination.error);
                 showError(actionError);
                 if (!config.launcherDir.empty() && !destination.explicitOverride &&
-                    link("Find an existing installation..."))
+                    ImGui::Button("Find an existing installation...", ImVec2(0, buttonHeight)))
                     openOptions();
                 ImGui::Spacing();
 
@@ -991,10 +998,13 @@ bool runWizardWindow(WizardConfig &config)
                 SetupStatus st = activeRun->status();
 
                 ImGui::Text("Phase: %s", stepName(st.step));
-                ImGui::TextWrapped("Current step: %s", st.detail.c_str());
+                // Ninja's task count uses a different scale than the overall setup bar.
+                const char *detail = st.step == Step::Build && st.detail.starts_with("[")
+                    ? "Compiling..." : st.detail.c_str();
+                ImGui::TextWrapped("Current step: %s", detail);
                 ImGui::Spacing();
 
-                float progressVal = static_cast<float>(st.overall);
+                const float progressVal = static_cast<float>(st.overall);
                 char overlay[64];
                 std::snprintf(overlay, sizeof(overlay), "%.0f%%", progressVal * 100.0f);
                 ImGui::ProgressBar(progressVal, ImVec2(-1, 26), overlay);
