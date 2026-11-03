@@ -178,6 +178,26 @@ int main(int argc, char **argv)
         return 0;
     }
     const bool managing = args.manage || (args.modeChosen && installed());
+    const auto rememberNormalChoice = [&] {
+        if (!rememberNormalInstallation(storage, destinationError, true))
+            return false;
+        if (storage.mode == SaveMode::Normal && !explicitDestination && !launcher.empty() && installed()) {
+            // A valid older sidecar can be retired once the profile record can find this copy.
+            const auto sidecar = launcher / "dw5e-install.json";
+            std::error_code sidecarError;
+            if (fs::is_regular_file(fs::symlink_status(sidecar, sidecarError))) {
+                fs::path oldChoice;
+                bool oldOverride = false;
+                std::string oldError;
+                if (resolveInstallLocation(launcher, {}, oldChoice, oldOverride, oldError) && !oldOverride) {
+                    fs::remove(sidecar, sidecarError);
+                    if (sidecarError)
+                        std::cerr << "Could not retire old installation choice: " << sidecarError.message() << '\n';
+                }
+            }
+        }
+        return true;
+    };
     const auto startGame = [&] {
         InstallationLock lock;
         if(!lock.acquire(data,destinationError)) { std::cerr<<destinationError<<std::endl;return 1; }
@@ -192,7 +212,7 @@ int main(int argc, char **argv)
         }
         fs::create_directories(data / "logs", ec);
         if(ec) { std::cerr<<"Cannot create game logs at "<<pathText(data/"logs")<<std::endl; return 1; }
-        if(!rememberNormalInstallation(storage,destinationError,true)) { std::cerr<<destinationError<<std::endl;return 1; }
+        if(!rememberNormalChoice()) { std::cerr<<destinationError<<std::endl;return 1; }
         const fs::path gameData = data / "game" / "files";
         std::vector<std::string> gameArgs = {
             "--game_data_root=" + pathText(gameData),
@@ -290,7 +310,7 @@ int main(int argc, char **argv)
         if(config.manageOnly) return 0;
         options = config.base;
         data = options.effectiveDataDir();
-        if(!loadInstallation(data,storage,destinationError) || !rememberNormalInstallation(storage,destinationError,args.noWindow)) {
+        if(!loadInstallation(data,storage,destinationError) || (args.noWindow && !rememberNormalChoice())) {
             std::cerr<<destinationError<<std::endl;return 1;
         }
         if (!release.empty() && !config.launchExistingBuild && !markBuilt()) {

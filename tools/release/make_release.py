@@ -50,7 +50,8 @@ Your files
   Installation files stay in game-files beside DW5E.exe by default. This folder holds
   extracted game files, the compiled game, generated code, cache, logs, tools and sources.
   Setup shows the destination; use Choose folder for another location.
-  A non-portable custom choice can be remembered in dw5e-install.json beside the launcher.
+  On this PC remembers the folder in the DW5E user configuration directory.
+  Older dw5e-install.json files are read for compatibility.
 
 Saves and settings
   Select the ISO first. The installation folder page then offers On this PC
@@ -121,7 +122,8 @@ Your files
   outside its temporary mount. Use Choose folder for another destination.
   game-files contains extracted game data, build, generated code, cache, logs and the
   writable builder (sources/tools copied from the AppImage). A custom choice can be
-  remembered in dw5e-install.json beside the launcher for non-portable installs.
+  remembered in the DW5E user configuration directory for On this PC mode.
+  Older dw5e-install.json files are read for compatibility.
 
 Saves and settings
   Select the ISO first. The installation folder page then offers On this PC

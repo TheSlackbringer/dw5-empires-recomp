@@ -496,8 +496,17 @@ bool discoverInstallations(const fs::path &launcher, std::vector<fs::path> &foun
             if (text.empty() || text.find('\0') != std::string::npos || !root.is_absolute())
                 return fail(file, "Installation locations must be absolute paths", error);
             add(root);
-            if (preferred && savedPreference != json.end() && *savedPreference == path && verified(root))
-                *preferred = resolvedPath(root);
+            if (preferred && savedPreference != json.end() && *savedPreference == path) {
+                Installation retained;
+                std::string metadataError;
+                const bool readyToReinstall = fs::is_directory(root, ec) &&
+                    installState(root) == InstallState::Missing &&
+                    loadInstallation(root, retained, metadataError) &&
+                    retained.recorded && retained.mode == SaveMode::Normal;
+                if (verified(root) || readyToReinstall)
+                    *preferred = resolvedPath(root);
+                ec.clear();
+            }
         }
     }
     add(normalBase(false)); // Read-only recognition of pre-010 installations.
@@ -697,9 +706,12 @@ bool uninstallGameFiles(const fs::path &selected, const fs::path &launcher, bool
     Installation installation;
     if (!loadInstallation(root, installation, error))
         return false;
-    if (rememberForReinstall && installation.mode != SaveMode::Portable &&
-        !rememberInstallLocation(launcher, root, error))
-        return false;
+    if (rememberForReinstall) {
+        if (installation.mode == SaveMode::Normal && !rememberNormalInstallation(installation, error, true))
+            return false;
+        if (installation.mode == SaveMode::Legacy && !rememberInstallLocation(launcher, root, error))
+            return false;
+    }
     // Persist legacy mode before removing the marker that originally implied it.
     if (!installation.recorded && !saveInstallation(installation, error))
         return false;

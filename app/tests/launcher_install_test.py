@@ -490,6 +490,18 @@ class LauncherInstallTests(unittest.TestCase):
         self.assertEqual(json.loads((selected / 'install.json').read_text())['save_mode'], 'portable')
         self.assertEqual((selected / 'user-data/save/progress').read_text(), 'portable progress')
 
+    def test_custom_normal_update_records_folder_in_user_profile(self):
+        selected = self.root / 'custom normal'
+        self.installed(selected)
+        put(selected / 'install.json', json.dumps({'version': 1, 'save_mode': 'normal'}))
+        sidecar = self.package / 'dw5e-install.json'
+        put(sidecar, json.dumps({'version': 1, 'data_dir': selected.as_posix()}))
+        self.env['DW5E_FIXTURE_GUI_FOLDER'] = str(selected)
+        self.launch('--no-window', '--rebuild', driver=True)
+        self.expect_index([selected], selected)
+        self.assertFalse(sidecar.exists())
+        self.assertEqual(P(json.loads(self.launch('--status').stdout)['installation']), selected)
+
     def test_portable_copy_to_new_release_retains_mode_without_user_folder_writes(self):
         installed=self.package/'game-files';self.installed(installed)
         put(installed/'install.json',json.dumps({'version':1,'save_mode':'portable'}))

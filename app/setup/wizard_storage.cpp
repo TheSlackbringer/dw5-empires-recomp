@@ -45,10 +45,10 @@ bool prepareWizardSelection(WizardConfig &config, InstallFolderSelection &select
             selection.error = "Choose an installation folder.";
         return false;
     }
-    const bool portable = (config.modeChosen ? config.desiredMode : installation.mode) == SaveMode::Portable;
-    if (portable)
+    const auto mode = config.modeChosen ? config.desiredMode : installation.mode;
+    if (mode != SaveMode::Legacy)
     {
-        // Portable mode keeps its installation record in <game folder>/install.json.
+        // Normal uses the user profile index. Portable keeps its metadata in the installation.
         if (!prepareWizardInstallation(config, selection.destination, selection.error))
             return false;
         selection.frozen = true;
