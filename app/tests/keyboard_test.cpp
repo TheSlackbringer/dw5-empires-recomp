@@ -48,6 +48,11 @@ class HeadlessContext final : public rex::ui::WindowedAppContext {
 
 class TestApp final : public Dw5eApp {
  public:
+  rex::PathConfig observed;
+  using rex::ReXApp::SetupEnvironment;
+  void OnConfigurePaths(rex::PathConfig& paths) override {
+    Dw5eApp::OnConfigurePaths(paths); observed=paths;
+  }
   explicit TestApp(HeadlessContext& ctx)
       : Dw5eApp(ctx, "dw5e-keyboard-test", PPCImageConfig) {}
 };
@@ -309,6 +314,41 @@ void TestOverrides(const Flags& initial, const std::filesystem::path& config) {
 }
 }  // namespace
 
+void TestHostConfigRouting() {
+  const auto original=SnapshotFlags();
+  const auto base=std::filesystem::temp_directory_path()/
+      ("dw5e-config-routing-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  auto set=[](const std::string& name,const std::string& value) {
+    for(auto& flag:rex::cvar::GetRegistry()) if(flag.name==name) {
+      flag.setter(value);flag.source=rex::cvar::Source::kCommandLine;return;
+    }
+    Check(false,"registered startup flag: "+name);
+  };
+  for(const auto* mode:{"normal","portable"}) {
+    RestoreFlags(original);
+    const auto root=base/mode/rex::to_path("settings ø 測試");
+    std::filesystem::create_directories(root);
+    const auto config=root/"dw5e-keyboard-test.toml";
+    std::ofstream(config)<<"mnk_mode = false\n";
+    set("config_root",rex::path_to_utf8(root));
+    set("user_data_root",rex::path_to_utf8(root/"saves"));
+    set("log_file",rex::path_to_utf8(root/"runtime.log"));
+    set("mnk_mode","true");
+    for(auto& flag:rex::cvar::GetRegistry()) if(flag.name=="mnk_mode") flag.source=rex::cvar::Source::kDefault;
+    {
+      HeadlessContext context;TestApp app(context);
+      Check(app.SetupEnvironment(),"native setup environment for "+std::string(mode));
+      Check(app.observed.config_path==config,"SDK uses chosen Unicode config directory for "+std::string(mode));
+      Check(app.observed.user_data_root==root/"saves","SDK keeps independent user-data root");
+      Check(!rex::cvar::Query<bool>("mnk_mode"),"SDK actually loaded settings from selected directory");
+      rex::cvar::SaveConfig(config);
+      Check(std::filesystem::file_size(config)>0,"SDK saves settings at selected path");
+    }
+    rex::ShutdownLogging();
+  }
+  RestoreFlags(original);
+}
+
 int main() {
   try {
     rex::LogConfig logging;
@@ -337,6 +377,7 @@ int main() {
     const auto config = std::filesystem::temp_directory_path() /
         ("dw5e-keyboard-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".toml");
     TestOverrides(initial, config);
+    TestHostConfigRouting();
     std::filesystem::remove(config);
     if (failures) return 1;
     std::cout << "PASS: application keyboard defaults, all bindings/releases/chords, focus, settings precedence, "

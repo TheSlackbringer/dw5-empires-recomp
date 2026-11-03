@@ -47,26 +47,39 @@ Play
   4. Every later start of DW5E.exe starts the game at once (<1 second).
 
 Your files
-  By default, game files, the built game, saves, settings, shader caches and logs stay beside
-  DW5E.exe. Setup shows the destination before installation. Use that folder, edit the path,
-  or use Choose folder. A custom choice is remembered in dw5e-install.json beside DW5E.exe.
-  The release folder must be writable to remember a choice. Move it or choose another
-  writable destination when setup reports an access error; no other location is chosen for you.
-  Move the complete folder on the same platform to keep the installed game and your saves.
-  A child-folder choice moves with it; an external custom folder stays where you selected it.
-  Update release files in place, preserving dw5e-install.json and all your installation files.
-  A required rebuild uses the installed game files, without asking for the ISO again.
-  Console setup: --data-dir <folder>. Advanced automation may use DW5E_DATA_DIR.
-  Priority: --data-dir, DW5E_DATA_DIR, remembered choice, launcher folder.
-  Explicit overrides apply to one invocation and do not overwrite your remembered GUI choice.
+  Installation files stay in game-files beside DW5E.exe by default. This folder holds
+  extracted game files, the compiled game, generated code, cache, logs, tools and sources.
+  Setup shows the destination; use Choose folder for another location.
+  A custom choice can be remembered in dw5e-install.json beside the launcher.
+
+Saves and settings
+  First setup offers On this PC (recommended) or With the game (portable).
+  On this PC uses %LOCALAPPDATA%/DW5E/user-data for saves/achievements and
+  %LOCALAPPDATA%/DW5E/config for settings and a small installation-location record.
+  Portable uses game-files/user-data for both. The mode is remembered inside the
+  installation and is retained on updates; you are not asked to choose it again.
+  Hold Shift when opening DW5E.exe, or run DW5E.exe --manage, to manage save location.
+  Close the game before switching. Saves/settings are copied and verified; originals
+  are retained. If both locations contain progress, choose which saves to use.
+
+Updating and existing installations
+  Replace release program files in the existing folder. Keep installed game files,
+  install.json and user-data; release ZIPs never include or replace player saves.
+  A fresh ZIP checks local files, recorded locations and nearby release folders.
+  Use existing installation lets you select the old folder when it cannot be found;
+  multiple matching installations require a choice. Existing mode and saves are reused.
+  A required rebuild uses installed game files without another ISO extraction.
+  Portable users should carry the complete launcher/game-files folder together.
+  Console: --data-dir <folder>, DW5E_DATA_DIR, --use-installation <folder>,
+  --manage --save-mode normal|portable, --save-conflict source|destination, --status.
+  Explicit path overrides apply to one invocation and do not replace remembered choices.
 
 Migration from an older release
-  Older Windows releases used %LOCALAPPDATA%\\DW5E. Keep that original as a backup.
-  Before starting the new launcher, copy the old installation's contents into your new
-  chosen destination. Keep the new release files when names conflict; the old generated
-  root dw5e_manifest.toml is not needed. Copy saves and settings too; do not move or delete
-  the original. Select the destination if it is outside the launcher folder. The launcher
-  recognizes installed game files and rebuilds if needed, without another ISO extraction.
+  Older releases may have flat installation folders or use %LOCALAPPDATA%/DW5E.
+  Choose the existing installation, then Import into game-files to copy its installed
+  game, build dependencies and saves/settings. Keep the original as a backup.
+  The new release sources/tools are preserved. Import does not delete the original.
+  Console equivalent: --import-installation <old-folder> --no-window.
 
 Controls (Default Xbox 360 Gamepad / Keyboard):
   A / Space       - Jump
@@ -100,31 +113,40 @@ Play
   4. Later starts open the game directly without rebuilding.
 
 Your files
-  By default, game files, the built game, saves, settings, shader caches, logs and the writable
-  builder stay beside the original AppImage, outside its temporary mount. An extracted
-  package uses its outer directory. Setup shows the destination before installation: use
-  that folder, edit the path, or use Choose folder. The choice is remembered beside the
-  launcher in dw5e-install.json. The release folder must be writable to save this choice.
-  An access error asks you to choose another folder or move the release; there is no fallback.
-  Move the complete installation folder on the same platform to retain the game and saves.
-  Relative child-folder choices move with it; external custom folders remain where selected.
-  Replace release files in place, preserving dw5e-install.json and your installation files.
-  A needed rebuild uses the installed game files without requesting the ISO again.
-  Console setup: --data-dir <folder>. Advanced automation may use DW5E_DATA_DIR.
-  Priority: --data-dir, DW5E_DATA_DIR, remembered choice, launcher folder.
-  Explicit invocation overrides do not replace your remembered GUI choice.
+  Installation files stay in game-files beside the original AppImage by default,
+  outside its temporary mount. Use Choose folder for another destination.
+  game-files contains extracted game data, build, generated code, cache, logs and the
+  writable builder (sources/tools copied from the AppImage). A custom choice can be
+  remembered in dw5e-install.json beside the launcher.
+
+Saves and settings
+  First setup offers On this PC (recommended) or With the game (portable).
+  On this PC uses $XDG_DATA_HOME/dw5e/user-data (default ~/.local/share/dw5e/user-data)
+  and $XDG_CONFIG_HOME/dw5e/config (default ~/.config/dw5e/config).
+  Portable uses game-files/user-data for both saves/achievements and settings.
+  Mode is recorded inside the installation and retained on updates.
+  Run the AppImage with --manage to change save location. Close the game first.
+  Saves/settings are copied and verified with originals retained; conflicting progress
+  requires an explicit choice of current or destination saves.
+
+Updating and existing installations
+  Replace the AppImage, keeping game-files, user-data and installation metadata.
+  A fresh download checks local files, recorded locations and nearby release folders.
+  Use existing installation selects an old installation when discovery cannot find it.
+  Multiple matches require a choice; updates retain the existing mode and saves.
+  Rebuilds use installed game files without another ISO. The launcher waits for the game
+  so the AppImage remains mounted; its writable builder stays outside the mount.
+  Console: --data-dir <folder>, DW5E_DATA_DIR, --use-installation <folder>,
+  --manage --save-mode normal|portable, --save-conflict source|destination, --status.
+  Explicit overrides do not replace remembered choices.
 
 Migration from an older release
-  Older releases used $XDG_DATA_HOME/dw5e (normally ~/.local/share/dw5e). Keep it as a backup.
-  Before starting the new launcher, copy the old installation's contents, including saves
-  and settings, into the new chosen destination. Keep new release files if names conflict;
-  the old generated root dw5e_manifest.toml is not needed. Never move or delete the original.
-  Select the destination if external. The launcher recognizes the installed game and can
-  rebuild from it without another extraction or ISO. Keep the AppImage alongside its
-  dw5e-install.json when updating; the launcher waits for the game before its mount closes.
+  Older releases may use a flat directory or ~/.local/share/dw5e.
+  Use existing installation and Import into game-files to copy installed files and
+  saves/settings, keeping the original as a backup. New release sources/tools remain.
+  Import does not delete the original. Console: --import-installation <old-folder>
+  --no-window. Keep dw5e-install.json when updating custom folder choices.
 
-Requires x86-64 Linux with glibc 2.31 or newer and a Vulkan graphics driver.
-Source code: https://github.com/TheSlackbringer/dw5-empires-recomp (GPL-3.0), version {build}.
 """
 
 
@@ -326,7 +348,8 @@ def windows(build, recomp_build, test):
         fail('required ReXGlue recompiler missing; searched: ' +
              ', '.join(str(p) for p in win_candidates))
 
-    for p in (launcher, LLVM_MINGW_WIN_ZIP, CMAKE_WIN_ZIP, NINJA_WIN_ZIP):
+    bootstrap = build / 'DW5E-bootstrap.exe'
+    for p in (launcher, bootstrap, LLVM_MINGW_WIN_ZIP, CMAKE_WIN_ZIP, NINJA_WIN_ZIP):
         if not p.exists():
             fail(f'required build artifact or tool missing: {p}')
 
@@ -337,22 +360,27 @@ def windows(build, recomp_build, test):
     shutil.rmtree(stage, ignore_errors=True)
     stage.mkdir(parents=True)
 
-    # Launcher
-    shutil.copy2(launcher, stage / 'DW5E.exe')
+    # Only the native bootstrap and README are exposed outside game-files.
+    payload = stage / 'game-files'
+    (payload / 'launcher').mkdir(parents=True)
+    shutil.copy2(bootstrap, stage / 'DW5E.exe')
+    shutil.copy2(launcher, payload / 'launcher/DW5E.exe')
     host_dlls = [recompiler.parent, build, LLVM_MINGW_HOST / 'x86_64-w64-mingw32/bin', LLVM_MINGW_HOST / 'bin']
+    if dll_closure(bootstrap, host_dlls):
+        fail('Windows bootstrap must depend only on system DLLs')
     for dll in dll_closure(launcher, host_dlls):
-        shutil.copy2(dll, stage / dll.name)
-    (stage / 'BUILD_ID').write_text(version + '\n')
+        shutil.copy2(dll, payload / 'launcher' / dll.name)
+    (payload / 'BUILD_ID').write_text(version + '\n')
 
     # Clean tracked source code
-    n = copy_tracked(REPO, ['app', 'patches', 'tools/windows', 'tools/linux', 'dw5e_manifest.toml', 'LICENSE', 'README.md'], stage,
+    n = copy_tracked(REPO, ['app', 'patches', 'tools/windows', 'tools/linux', 'dw5e_manifest.toml', 'LICENSE', 'README.md'], payload,
                      skip=('app/generated/default/',))
     if (REPO / 'rexglue-sdk').exists():
-        n += copy_tracked(REPO / 'rexglue-sdk', ['.'], stage / 'rexglue-sdk',
+        n += copy_tracked(REPO / 'rexglue-sdk', ['.'], payload / 'rexglue-sdk',
                           skip=('tools/binutils/', 'out/', 'tests/', 'docs/', 'thirdparty/moltenvk/', 'thirdparty/vulkan-loader/tests/'))
 
     # Bundled Tools
-    tools = stage / 'tools'
+    tools = payload / 'tools'
     tools.mkdir(parents=True, exist_ok=True)
     shutil.copy2(recompiler, tools / 'rexglue.exe')
     for dll in dll_closure(recompiler, host_dlls):
@@ -364,7 +392,7 @@ def windows(build, recomp_build, test):
 
     # README and licenses
     (stage / 'README.txt').write_text(README_WINDOWS.format(build=version).replace('\n', '\r\n'))
-    lic = stage / 'LICENSES'
+    lic = payload / 'LICENSES'
     lic.mkdir(parents=True, exist_ok=True)
     shutil.copy2(REPO / 'LICENSE', lic / 'dw5e (GPL-3.0).txt')
     shutil.copy2(REPO / 'rexglue-sdk/LICENSE', lic / 'rexglue-sdk (BSD-3-Clause).txt')

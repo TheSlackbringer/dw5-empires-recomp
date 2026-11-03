@@ -65,7 +65,7 @@ jobs:
 
       - name: Build setup wizard, tests & ReXGlue recompiler
         run: |
-          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_host_unicode_test dw5e_install_location_test dw5e_install_folder_test dw5e_install_fake_game dw5e_launcher_selection_driver dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test dw5e_keyboard_test dw5e_vulkan_startup_test dw5e_guest_frame_stats_test dw5e_frame_timing_test rexgpu-xenos rexglue -j$(nproc)
+          cmake --build app/build-linux --target dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_storage_policy_test dw5e_storage_default_test dw5e_host_unicode_test dw5e_install_location_test dw5e_install_folder_test dw5e_install_fake_game dw5e_launcher_selection_driver dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test dw5e_keyboard_test dw5e_vulkan_startup_test dw5e_guest_frame_stats_test dw5e_frame_timing_test rexgpu-xenos rexglue -j$(nproc)
 
       - name: Run unit tests
         run: |
@@ -215,7 +215,7 @@ jobs:
 
       - name: Build Windows setup wizard & ReXGlue recompiler
         run: |
-          cmake --build app/build-windows --target dw5e_dxc_uuid_test dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_host_unicode_test dw5e_install_location_test dw5e_install_folder_test dw5e_install_fake_game dw5e_launcher_selection_driver dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test dw5e_keyboard_test dw5e_guest_frame_stats_test dw5e_frame_timing_test rexgpu-xenos rexglue -j$(nproc)
+          cmake --build app/build-windows --target dw5e_dxc_uuid_test dw5e_setup dw5e_setup_test dw5e_setup_reliability_test dw5e_storage_policy_test dw5e_storage_default_test dw5e_host_unicode_test dw5e_install_location_test dw5e_install_folder_test dw5e_install_fake_game dw5e_launcher_selection_driver dw5e_safe_read_test dw5e_host_portability dw5e_kernel_export_test dw5e_gpu_plugin_test dw5e_keyboard_test dw5e_guest_frame_stats_test dw5e_frame_timing_test rexgpu-xenos rexglue -j$(nproc)
 
       - name: Package Windows compiler zip
         env:
@@ -240,6 +240,8 @@ jobs:
           path: |
             app/build-windows/dw5e_setup_test.exe
             app/build-windows/dw5e_setup_reliability_test.exe
+            app/build-windows/dw5e_storage_policy_test.exe
+            app/build-windows/dw5e_storage_default_test.exe
             app/build-windows/dw5e_host_unicode_test.exe
             app/build-windows/dw5e_install_location_test.exe
             app/build-windows/dw5e_install_folder_test.exe
@@ -295,6 +297,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Setup unit tests failed' }
           & (Join-Path $package[0].FullName 'dw5e_setup_reliability_test.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Setup reliability tests failed' }
+          & (Join-Path $package[0].FullName 'dw5e_storage_policy_test.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Save-mode policy tests failed' }
+          & (Join-Path $package[0].FullName 'dw5e_storage_default_test.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Consolidated default tests failed' }
           & (Join-Path $package[0].FullName 'dw5e_host_unicode_test.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Unicode host path tests failed' }
           & (Join-Path $package[0].FullName 'dw5e_install_location_test.exe')
@@ -305,8 +311,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Guest frame statistics tests failed' }
           & (Join-Path $package[0].FullName 'dw5e_frame_timing_test.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Frame timing tests failed' }
-          python app/tests/launcher_install_test.py --launcher (Join-Path $package[0].FullName 'DW5E.exe') --game (Join-Path $package[0].FullName 'dw5e_install_fake_game.exe') --selection-driver (Join-Path $package[0].FullName 'dw5e_launcher_selection_driver.exe') --runtime-bin (Join-Path $package[0].FullName 'tools/llvm-mingw/bin') --out artifacts/portable-install-tests
+          python app/tests/launcher_install_test.py --launcher (Join-Path $package[0].FullName 'game-files/launcher/DW5E.exe') --game (Join-Path $package[0].FullName 'dw5e_install_fake_game.exe') --selection-driver (Join-Path $package[0].FullName 'dw5e_launcher_selection_driver.exe') --runtime-bin (Join-Path $package[0].FullName 'game-files/tools/llvm-mingw/bin') --out artifacts/portable-install-tests
           if ($LASTEXITCODE -ne 0) { throw 'Portable launcher integration tests failed' }
+          python app/tests/bootstrap_test.py --bootstrap (Join-Path $package[0].FullName 'DW5E.exe') --child (Join-Path $package[0].FullName 'dw5e_install_fake_game.exe') --runtime-bin (Join-Path $package[0].FullName 'game-files/tools/llvm-mingw/bin') --out artifacts/bootstrap-tests
+          if ($LASTEXITCODE -ne 0) { throw 'Native bootstrap tests failed' }
           & (Join-Path $package[0].FullName 'dw5e_safe_read_test.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Snapshot safe-read tests failed' }
           & (Join-Path $package[0].FullName 'dw5e_dxc_uuid_test.exe')

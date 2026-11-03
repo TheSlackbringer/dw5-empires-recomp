@@ -193,6 +193,15 @@ fs::path launcherDirectory(std::string &error)
             return {};
         }
 #endif
+    // The Windows package keeps its real wizard and DLLs in the payload.
+#ifdef _WIN32
+    const bool packaged = _wcsicmp(directory.filename().c_str(),L"launcher")==0 &&
+        _wcsicmp(directory.parent_path().filename().c_str(),L"game-files")==0;
+#else
+    const bool packaged = directory.filename()=="launcher" && directory.parent_path().filename()=="game-files";
+#endif
+    if (packaged && fs::is_regular_file(directory.parent_path() / "BUILD_ID"))
+        return directory.parent_path().parent_path();
     return directory;
 }
 bool resolveInstallLocation(const fs::path &launcher, const fs::path &commandLine, fs::path &destination,
@@ -228,7 +237,9 @@ bool resolveInstallLocation(const fs::path &launcher, const fs::path &commandLin
         return failure(config, ec.message(), error);
     if (!exists)
     {
-        destination = launcher;
+        const auto child = launcher / "game-files";
+        destination = fs::is_regular_file(child / "game/installed.txt") ? child :
+            fs::is_regular_file(launcher / "game/installed.txt") ? launcher : child;
         return true;
     }
     if (!fs::is_regular_file(config, ec) || fs::file_size(config, ec) > 65536 || ec)
@@ -284,16 +295,25 @@ bool rememberInstallLocation(const fs::path &launcher, const fs::path &destinati
     const auto relative = relativeChoice(chosen, base);
     const auto stored = relative.empty() ? chosen : relative;
     const auto text = nlohmann::json{{"version", 1}, {"data_dir", pathText(stored)}}.dump(2) + "\n";
-    const auto temp = uniqueFile(base, "dw5e-install.json.tmp-");
     const auto config = base / "dw5e-install.json";
+    // The fixed default needs no loose sidecar in a newly extracted release.
+    if (chosen == base / "game-files" && !fs::exists(config)) return true;
+    return writeAtomicText(config, text, error);
+}
+bool writeAtomicText(const fs::path &config, const std::string &text, std::string &error)
+{
+    std::error_code directoryError;
+    fs::create_directories(config.parent_path(), directoryError);
+    if (directoryError) return failure(config, directoryError.message(), error);
+    const auto temp = uniqueFile(config.parent_path(), pathText(config.filename()) + ".tmp-");
     if (!writeExclusive(temp, text, error))
         return false;
 #ifdef _WIN32
     const bool moved =
         MoveFileExW(temp.c_str(), config.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
     if (!moved)
-        error = "Cannot save installation choice beside launcher '" + pathText(config) + "' (Windows error " +
-                std::to_string(GetLastError()) + "). Move the release to a writable folder.";
+        error = "Cannot atomically save '" + pathText(config) + "' (Windows error " +
+                std::to_string(GetLastError()) + "). Check access to this folder.";
 #else
     const bool moved = rename(temp.c_str(), config.c_str()) == 0;
     if (!moved)

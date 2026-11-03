@@ -30,6 +30,22 @@ struct DialogState
     bool hasResult = false;
 };
 
+struct Preparation {
+    WizardConfig config;
+    InstallFolderSelection selection;
+    std::atomic<bool> done{false};
+    bool ok=false;
+    std::thread worker;
+    Preparation(const WizardConfig &source,const InstallFolderSelection &folder):config(source),selection(folder) {
+        worker=std::thread([this] {
+            try { ok=prepareWizardSelection(config,selection); }
+            catch(const std::exception &error) { selection.error=error.what(); }
+            done.store(true,std::memory_order_release);
+        });
+    }
+    ~Preparation() { if(worker.joinable()) worker.join(); }
+};
+
 static void SDLCALL onFileDialogCallback(void *userdata, const char * const *filelist, int filter)
 {
     (void)filter;
@@ -149,9 +165,10 @@ bool runWizardWindow(WizardConfig &config)
         if (!config.layoutError.empty()) {
             std::cerr << "Setup error: " << config.layoutError << std::endl; return false;
         }
-        if (!destination.prepare()) {
-            std::cerr << "Setup destination error: " << destination.error << std::endl; return false;
+        if(!prepareWizardSelection(config,destination)) {
+            std::cerr<<"Setup destination/save-location error: "<<destination.error<<std::endl; return false;
         }
+        if(config.manageOnly) { std::cout<<"SUCCESS: save location updated without rebuilding the game."<<std::endl;return true; }
         return runWizardConsole(config.base) == 0;
     };
     if (config.noWindow) return console();
@@ -163,7 +180,7 @@ bool runWizardWindow(WizardConfig &config)
     }
 
     const int kWindowW = 680;
-    const int kWindowH = 460;
+    const int kWindowH = 640;
     SDL_Window *window = SDL_CreateWindow("Dynasty Warriors 5: Empires - Setup",
                                           kWindowW, kWindowH,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
@@ -212,9 +229,13 @@ bool runWizardWindow(WizardConfig &config)
 
     DialogState dialogState;
     auto folderDialog = std::make_shared<DialogState>();
+    auto existingDialog = std::make_shared<DialogState>();
     char destinationBuf[32768] = {};
     std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
     std::unique_ptr<SetupRun> activeRun;
+    std::unique_ptr<Preparation> preparation;
+    bool closeAfterPreparation=false;
+    const auto beginPreparation=[&] { preparation=std::make_unique<Preparation>(config,destination);destination.frozen=true; };
     bool quit = false;
     bool succeeded = false;
 
@@ -230,11 +251,11 @@ bool runWizardWindow(WizardConfig &config)
             ImGui_ImplSDL3_ProcessEvent(&event);
             if (event.type == SDL_EVENT_QUIT)
             {
-                if (activeRun)
-                    activeRun->cancel();
-                quit = true;
+                if (activeRun) activeRun->cancel();
+                if(preparation) closeAfterPreparation=true;
+                else quit = true;
             }
-            else if (event.type == SDL_EVENT_DROP_FILE && !activeRun)
+            else if (event.type == SDL_EVENT_DROP_FILE && !activeRun && !preparation)
             {
                 if (event.drop.data)
                 {
@@ -245,7 +266,7 @@ bool runWizardWindow(WizardConfig &config)
 
         {
             std::lock_guard<std::mutex> lock(dialogState.mutex);
-            if (dialogState.hasResult && !activeRun)
+            if (dialogState.hasResult && !activeRun && !preparation)
             {
                 std::snprintf(isoPathBuf, sizeof(isoPathBuf), "%s", dialogState.selectedFile.c_str());
                 dialogState.hasResult = false;
@@ -255,12 +276,35 @@ bool runWizardWindow(WizardConfig &config)
         {
             std::lock_guard<std::mutex> lock(folderDialog->mutex);
             if (folderDialog->hasResult) {
-                if (!activeRun && destination.choose(pathFromText(folderDialog->selectedFile)))
+                if (!activeRun && !preparation && destination.choose(pathFromText(folderDialog->selectedFile)))
                     std::snprintf(destinationBuf, sizeof(destinationBuf), "%s", pathText(destination.destination).c_str());
                 folderDialog->hasResult=false;
             }
         }
-        destination.frozen=bool(activeRun);
+        {
+            std::lock_guard<std::mutex> lock(existingDialog->mutex);
+            if(existingDialog->hasResult) {
+                if(!activeRun && !preparation) {
+                    const auto existing=existingInstallationRoot(pathFromText(existingDialog->selectedFile));
+                    if(existing.empty()) destination.error="Choose a folder containing a verified DW5E installation.";
+                    else { destination.choose(existing);config.modeChosen=false;config.importSource.clear();
+                        std::snprintf(destinationBuf,sizeof(destinationBuf),"%s",pathText(existing).c_str()); }
+                }
+                existingDialog->hasResult=false;
+            }
+        }
+        if(preparation && preparation->done.load(std::memory_order_acquire)) {
+            const bool ok=preparation->ok;
+            config=std::move(preparation->config);
+            destination=std::move(preparation->selection);
+            preparation.reset();
+            if(closeAfterPreparation) quit=true;
+            else if(ok) {
+                if(config.manageOnly) {succeeded=true;quit=true;}
+                else {activeRun=std::make_unique<SetupRun>(config.base);activeRun->start();}
+            }
+        }
+        destination.frozen=bool(activeRun)||bool(preparation);
 
         ImGui_ImplSDLRenderer3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -289,8 +333,8 @@ bool runWizardWindow(WizardConfig &config)
                     if (*destinationBuf) destination.choose(pathFromText(destinationBuf));
                     else destination.error="Choose an installation folder before continuing.";
                 }
-                if (ImGui::Button("Use launcher folder")) {
-                    destination.choose(config.launcherDir);
+                if (ImGui::Button("Use game-files beside launcher")) {
+                    destination.choose(config.launcherDir / "game-files");
                     std::snprintf(destinationBuf,sizeof(destinationBuf),"%s",pathText(destination.destination).c_str());
                 }
                 ImGui::SameLine();
@@ -308,6 +352,55 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::Separator();
             }
 
+            if(!activeRun && !preparation && (!config.launcherDir.empty() || config.explicitDestination)) {
+                for(const auto &candidate:config.discovered) {
+                    const auto label="Use "+pathText(candidate);
+                    if(ImGui::Button(label.c_str())) {
+                        destination.choose(candidate);config.modeChosen=false;config.importSource.clear();
+                        std::snprintf(destinationBuf,sizeof(destinationBuf),"%s",pathText(candidate).c_str());
+                    }
+                }
+                if(ImGui::Button("Use existing installation..."))
+                    SDL_ShowOpenFolderDialog(onFolderDialog,new std::shared_ptr<DialogState>(existingDialog),window,nullptr,false);
+                Installation selected;std::string selectedError;
+                if(loadInstallation(destination.destination,selected,selectedError)) {
+                    Installation preview=selected;
+                    const bool choosing=!selected.recorded && installState(selected.root)!=InstallState::Installed;
+                    if(choosing || config.manageOnly) {
+                        ImGui::TextUnformatted("Where should saves and settings be stored?");
+                        const auto desired=config.modeChosen?config.desiredMode:selected.mode;
+                        if(ImGui::RadioButton("On this PC (recommended)",desired==SaveMode::Normal)) {
+                            config.desiredMode=SaveMode::Normal;config.modeChosen=true;destination.error.clear();
+                        }
+                        if(ImGui::RadioButton("With the game (portable)",desired==SaveMode::Portable)) {
+                            config.desiredMode=SaveMode::Portable;config.modeChosen=true;destination.error.clear();
+                        }
+                        if(config.modeChosen) configureSaveMode(preview,config.desiredMode);
+                    } else {
+                        ImGui::Text("Save location: %s",selected.mode==SaveMode::Normal?"On this PC":selected.mode==SaveMode::Portable?"With the game (portable)":"Existing legacy installation");
+                        if(ImGui::Button("Manage save location")) config.manageOnly=true;
+                    }
+                    ImGui::TextWrapped("Saves: %s",pathText(preview.userData).c_str());
+                    ImGui::TextWrapped("Settings: %s",pathText(preview.configDir).c_str());
+                    if(config.manageOnly) {
+                        ImGui::TextWrapped("Close the game before switching. Original saves are kept as a backup.");
+                        if(destination.error.find("conflict")!=std::string::npos || config.conflict!=SaveConflict::Ask) {
+                            ImGui::TextWrapped("Both locations contain progress. Choose which files to use:");
+                            if(ImGui::RadioButton("Use current saves (back up conflicting destination files)",config.conflict==SaveConflict::UseSource)) {config.conflict=SaveConflict::UseSource;destination.error.clear();}
+                            if(ImGui::RadioButton("Keep destination saves",config.conflict==SaveConflict::KeepDestination)) {config.conflict=SaveConflict::KeepDestination;destination.error.clear();}
+                        }
+                    }
+                    if(selected.mode==SaveMode::Legacy && selected.root!=config.launcherDir/"game-files") {
+                        if(ImGui::Button("Import into game-files (keep original installation)")) {
+                            config.importSource=selected.root;destination.choose(config.launcherDir/"game-files");
+                            config.modeChosen=true;config.desiredMode=SaveMode::Normal;config.manageOnly=false;
+                            std::snprintf(destinationBuf,sizeof(destinationBuf),"%s",pathText(destination.destination).c_str());
+                        }
+                    }
+                } else if(destination.error.empty()) destination.error=selectedError;
+                ImGui::Separator();
+            }
+
             if (!config.layoutError.empty())
             {
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.30f, 0.30f, 1.0f));
@@ -315,6 +408,17 @@ bool runWizardWindow(WizardConfig &config)
                 ImGui::PopStyleColor();
                 if (ImGui::Button("Exit", ImVec2(100, 36)))
                     quit = true;
+            }
+            else if(preparation) {
+                ImGui::TextWrapped("Preparing the installation and verifying file copies...");
+                ImGui::TextWrapped("Original saves are retained. The destination is locked until this finishes.");
+                if(closeAfterPreparation) ImGui::TextWrapped("Closing after the current safe copy finishes.");
+            }
+            else if(config.manageOnly && !activeRun) {
+                if(ImGui::Button("Save change",ImVec2(160,36))) {
+                    beginPreparation();
+                }
+                ImGui::SameLine();if(ImGui::Button("Close",ImVec2(100,36))) quit=true;
             }
             else if (!activeRun)
             {
@@ -427,15 +531,8 @@ bool runWizardWindow(WizardConfig &config)
 
                 if (ImGui::Button("Install & Play", ImVec2(160, 36)))
                 {
-                    if (destination.prepare()) {
-                        if (!config.launcherDir.empty() || config.explicitDestination)
-                            config.base.dataDir = destination.destination;
-                        SetupOptions opts = config.base;
-                        if (isoValid)
-                            opts.discIso = pathFromText(validatedIsoPath);
-                        activeRun = std::make_unique<SetupRun>(opts);
-                        activeRun->start();
-                    }
+                    if(isoValid) config.base.discIso=pathFromText(validatedIsoPath);
+                    beginPreparation();
                 }
 
                 if (!canStart)

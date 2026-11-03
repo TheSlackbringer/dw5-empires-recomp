@@ -46,6 +46,7 @@
 #include <filesystem>
 #include <string_view>
 
+REXCVAR_DEFINE_STRING(config_root, "", "Runtime", "Override host settings directory");
 REXCVAR_DEFINE_STRING(gpu_plugin, "", "GPU",
                       "GPU emulation plugin to load at startup (e.g. 'xenos'); empty disables "
                       "GPU emulation")
@@ -142,8 +143,10 @@ bool ReXApp::SetupEnvironment() {
     metadata_dir = rex::to_path(metadata_root_cvar);
   }
 
-  PathConfig path_config{game_dir,  user_dir,     update_dir,
-                         cache_dir, metadata_dir, exe_dir / (std::string(GetName()) + ".toml")};
+  const auto config_root = REXCVAR_GET(config_root);
+  const auto config_dir = config_root.empty() ? exe_dir : rex::to_path(config_root);
+  PathConfig path_config{game_dir, user_dir, update_dir, cache_dir, metadata_dir,
+                         config_dir / (std::string(GetName()) + ".toml")};
   OnConfigurePaths(path_config);
   game_data_root_ = path_config.game_data_root;
   user_data_root_ = path_config.user_data_root;

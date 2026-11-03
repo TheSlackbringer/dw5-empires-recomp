@@ -4,6 +4,8 @@
 #include "run_process.h"
 #include "setup_layout.h"
 #include "wizard_ui.h"
+#include "installation.h"
+#include "../../rexglue-sdk/thirdparty/inja/third_party/include/nlohmann/json.hpp"
 
 #include <cstdio>
 #include <fstream>
@@ -31,6 +33,12 @@ struct Args
     bool noWindow = false;
     bool installOnly = false;
     bool rebuild = false;
+    bool manage = false;
+    bool status = false;
+    bool modeChosen = false;
+    SaveMode mode = SaveMode::Normal;
+    SaveConflict conflict = SaveConflict::Ask;
+    fs::path existing, importSource;
 };
 
 std::string firstLine(const fs::path &path)
@@ -48,15 +56,32 @@ Args parseArgs(const std::vector<std::string> &argv)
     Args a;
     for (size_t i=1;i<argv.size();++i) {
         const auto &arg=argv[i];
-        if(arg=="--iso" || arg=="--disc" || arg=="--root" || arg=="--data-dir") {
+        if(arg=="--iso" || arg=="--disc" || arg=="--root" || arg=="--data-dir" || arg=="--use-installation" || arg=="--import-installation") {
             if(i+1==argv.size() || argv[i+1].empty() || argv[i+1].starts_with("--")) {
                 a.error="Missing path after "+arg; break;
             }
             const auto path=pathFromText(argv[++i]);
             if(arg=="--root") a.root=path;
             else if(arg=="--data-dir") a.dataDir=path;
+            else if(arg=="--use-installation") a.existing=path;
+            else if(arg=="--import-installation") a.importSource=path;
             else a.iso=path;
-        } else if(arg=="--no-window") a.noWindow=true;
+        } else if(arg=="--save-mode" || arg=="--save-conflict") {
+            if(i+1==argv.size()) { a.error="Missing value after "+arg; break; }
+            const auto value=argv[++i];
+            if(arg=="--save-mode") {
+                a.modeChosen=true;
+                if(value=="normal") a.mode=SaveMode::Normal;
+                else if(value=="portable") a.mode=SaveMode::Portable;
+                else { a.error="Save mode must be normal or portable"; break; }
+            } else {
+                if(value=="source") a.conflict=SaveConflict::UseSource;
+                else if(value=="destination") a.conflict=SaveConflict::KeepDestination;
+                else if(value!="ask") { a.error="Save conflict choice must be ask, source or destination"; break; }
+            }
+        } else if(arg=="--manage") a.manage=true;
+        else if(arg=="--status") a.status=true;
+        else if(arg=="--no-window") a.noWindow=true;
         else if(arg=="--install") { a.installOnly=true; a.noWindow=true; }
         else if(arg=="--rebuild") a.rebuild=true;
         else if(arg=="--audio_mute=true") a.audioMute=true;
@@ -72,14 +97,16 @@ int main(int argc, char **argv)
     const Args args = parseArgs(nativeArguments(argc, argv));
     if (args.help) {
         std::cout << "DW5E setup: [--iso <disc>] [--data-dir <folder>] [--install | --no-window] [--rebuild]\n"
-                     "Installation defaults beside DW5E.exe / the original AppImage. The wizard can remember another folder.\n"
-                     "Overrides: --data-dir, DW5E_DATA_DIR, remembered choice, launcher folder. Invocation overrides are not saved.\n";
+                     "Installation defaults to game-files beside DW5E.exe / the original AppImage. Saves: this PC or portable.\n"
+                     "Overrides: --data-dir, DW5E_DATA_DIR, remembered choice, launcher folder. Invocation overrides are not saved.\n"
+                     "Manage: --manage [--save-mode normal|portable] [--save-conflict source|destination]\n"
+                     "Existing files: --use-installation <folder> or --import-installation <folder>. Inspect with --status.\n";
         return 0;
     }
     if (!args.error.empty()) { std::cerr << args.error << std::endl; return 1; }
 
     std::error_code ec;
-    fs::path root = args.root;
+    fs::path root = args.root.empty() ? fs::path{} : fs::absolute(args.root,ec).lexically_normal();
     if (root.empty())
     {
         std::string discoveryError;
@@ -104,6 +131,9 @@ int main(int argc, char **argv)
     fs::path game, data, launcher;
     bool explicitDestination = false;
     std::string destinationError;
+    Installation storage;
+    std::vector<fs::path> discovered;
+    fs::path importSource;
 
     if (!release.empty())
     {
@@ -111,10 +141,25 @@ int main(int argc, char **argv)
         std::string resolveError;
         if (!resolveInstallLocation(launcher, args.dataDir, data, explicitDestination, resolveError))
             destinationError = resolveError;
-        else if (!validateInstallDirectory(data, resolveError))
+        else if (!args.existing.empty()) {
+            data = existingInstallationRoot(args.existing);
+            if(data.empty()) destinationError = "Selected folder is not a verified DW5E installation: " + pathText(args.existing);
+            else destinationError.clear();
+        }
+        else if (args.importSource.empty() && !explicitDestination && !fs::exists(launcher / "dw5e-install.json") &&
+                 installState(data) != InstallState::Installed) {
+            if(!discoverInstallations(launcher, discovered, resolveError)) destinationError=resolveError;
+            else if(discovered.size()==1) { data=discovered.front(); destinationError.clear(); }
+            else if(discovered.size()>1) destinationError="Several existing DW5E installations were found. Choose one below.";
+        }
+        if (destinationError.empty() && !args.importSource.empty()) {
+            importSource=existingInstallationRoot(args.importSource);
+            if(importSource.empty()) destinationError="Cannot import an unverified DW5E installation: "+pathText(args.importSource);
+            else if(!explicitDestination) data=launcher/"game-files";
+        }
+        if (destinationError.empty() && !loadInstallation(data, storage, resolveError)) destinationError=resolveError;
+        if (destinationError.empty() && !args.status && !validateInstallDirectory(data, resolveError))
             destinationError = resolveError;
-        else
-            destinationError.clear();
         options.dataDir = data;
         game = options.effectiveBuildDir() / (kWindows ? "dw5e.exe" : "dw5e");
     }
@@ -123,15 +168,35 @@ int main(int argc, char **argv)
         return installState(data) == InstallState::Installed;
     };
 
+    if(args.status) {
+        if(!destinationError.empty()) { std::cerr<<destinationError<<std::endl; return 1; }
+        std::cout<<nlohmann::json{{"installation",pathText(data)},{"save_mode",saveModeName(storage.mode)},
+            {"user_data",pathText(storage.userData)},{"config",pathText(storage.configDir)},
+            {"recorded",storage.recorded}}.dump(2)<<std::endl;
+        return 0;
+    }
+    const bool managing = args.manage || (args.modeChosen && installed());
     const auto startGame = [&] {
+        InstallationLock lock;
+        if(!lock.acquire(data,destinationError)) { std::cerr<<destinationError<<std::endl;return 1; }
         if (!validateInstallDirectory(data, destinationError)) {
             std::cerr << "DW5E launcher error: " << destinationError << std::endl; return 1;
         }
         game = options.effectiveBuildDir() / (kWindows ? "dw5e.exe" : "dw5e");
+        if(!loadInstallation(data, storage, destinationError) ||
+           !validateInstallDirectory(storage.userData,destinationError) ||
+           !validateInstallDirectory(storage.configDir,destinationError)) {
+            std::cerr<<"DW5E save-location error: "<<destinationError<<std::endl; return 1;
+        }
+        fs::create_directories(data / "logs", ec);
+        if(ec) { std::cerr<<"Cannot create game logs at "<<pathText(data/"logs")<<std::endl; return 1; }
+        if(!rememberNormalInstallation(storage,destinationError)) { std::cerr<<destinationError<<std::endl;return 1; }
         const fs::path gameData = data / "game" / "files";
         std::vector<std::string> gameArgs = {
             "--game_data_root=" + pathText(gameData),
-            "--user_data_root=" + pathText(data),
+            "--user_data_root=" + pathText(storage.userData),
+            "--config_root=" + pathText(storage.configDir),
+            "--log_file=" + pathText(data / "logs" / "runtime.log"),
             "--cache_root=" + pathText(data / "cache"),
             "--gpu_plugin=xenos"
         };
@@ -175,7 +240,7 @@ int main(int argc, char **argv)
     };
 
     // Fast-path: if game is already built for this release and disc is installed, boot immediately!
-    if (!release.empty() && layoutError.empty() && destinationError.empty() && !args.rebuild && !args.installOnly &&
+    if (!release.empty() && layoutError.empty() && destinationError.empty() && !args.rebuild && !args.installOnly && !managing && !args.modeChosen && importSource.empty() &&
         fs::exists(game) && firstLine(options.effectiveBuildDir() / "built-from.txt") == release && installed())
     {
         if (args.noWindow)
@@ -187,7 +252,7 @@ int main(int argc, char **argv)
     }
 
     // Build-only prerequisites must not block an already-built game's fast path.
-    if (layoutError.empty() && findLayout(root, kWindows, layout, layoutError))
+    if (!managing && layoutError.empty() && findLayout(root, kWindows, layout, layoutError))
     {
         options.recompiler = layout.recompiler;
         options.tools = layout.tools;
@@ -208,13 +273,23 @@ int main(int argc, char **argv)
     config.prefilledIso = args.iso;
     config.discInstalled = installed();
     config.noWindow = args.noWindow;
+    config.manageOnly = managing;
+    config.modeChosen = args.modeChosen;
+    config.desiredMode = args.mode;
+    config.conflict = args.conflict;
+    config.importSource = importSource;
+    config.discovered = discovered;
     config.closeWhenFinished = true;
 
     bool ok = runWizardWindow(config);
     if (ok)
     {
+        if(config.manageOnly) return 0;
         options = config.base;
         data = options.effectiveDataDir();
+        if(!loadInstallation(data,storage,destinationError) || !rememberNormalInstallation(storage,destinationError)) {
+            std::cerr<<destinationError<<std::endl;return 1;
+        }
         if (!release.empty() && !markBuilt()) {
             std::cerr << "Cannot finish build marker at " << pathText(options.effectiveBuildDir()) << std::endl;
             return 1;

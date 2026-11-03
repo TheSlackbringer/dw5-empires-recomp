@@ -86,7 +86,7 @@ bool generateCode(const fs::path &root,
     if (progress)
         progress(0.1, "Starting ReXGlue recompiler...");
 
-    std::vector<std::string> args = {"codegen", pathText(manifestPath)};
+    std::vector<std::string> args = {"codegen", pathText(manifestPath), "--log-file", pathText(logDir / "recompiler.log")};
     ProcessResult res;
     std::vector<std::pair<std::string, std::string>> env;
 #ifndef _WIN32

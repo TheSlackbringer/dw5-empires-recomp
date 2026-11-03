@@ -15,6 +15,7 @@ bool resolveInstallLocation(const std::filesystem::path &launcher, const std::fi
 bool validateInstallDirectory(const std::filesystem::path &directory, std::string &error);
 bool rememberInstallLocation(const std::filesystem::path &launcher, const std::filesystem::path &destination,
                              std::string &error);
+bool writeAtomicText(const std::filesystem::path &file, const std::string &text, std::string &error);
 // Shared by the wizard and its disc-free regression tests. Empty picker results are cancellation.
 struct InstallFolderSelection
 {

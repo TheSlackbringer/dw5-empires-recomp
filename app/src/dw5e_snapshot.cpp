@@ -1,4 +1,4 @@
-// Debug: F9 dumps guest memory to notes/snapshots/snap_NNN.bin for diffing (camera hunt).
+// Debug: F9 dumps guest memory to the installation cache/snapshots for local debugging.
 //
 // File format (all little-endian): "DW5SNAP1", then records of
 //   u32 guest_address, u32 length, length bytes of raw (big-endian guest) data.
@@ -16,6 +16,7 @@
 
 #include <fmt/format.h>
 #include <rex/logging.h>
+#include <rex/filesystem.h>
 #include <rex/runtime.h>
 #include <rex/ui/keybinds.h>
 
@@ -37,8 +38,9 @@ bool ReadChunk(const uint8_t* host, std::vector<uint8_t>& buf) {
 
 void TakeSnapshot() {
   const uint8_t* base = rex::Runtime::instance()->virtual_membase();
-  const char* home = std::getenv("HOME");
-  std::filesystem::path dir = std::filesystem::path(home ? home : ".") / "Projects/dw5e-port/notes/snapshots";
+  auto cache = rex::Runtime::instance()->cache_root();
+  if (cache.empty()) cache = rex::filesystem::GetExecutableFolder() / "cache";
+  const auto dir = cache / "snapshots";
   std::filesystem::create_directories(dir);
   int n = g_counter.fetch_add(1) + 1;
   std::filesystem::path path = dir / fmt::format("snap_{:03}.bin", n);
@@ -56,7 +58,7 @@ void TakeSnapshot() {
       saved += kChunk;
     }
   }
-  REXLOG_INFO("[snapshot] #{} saved {} MiB to {}", n, saved >> 20, path.string());
+  REXLOG_INFO("[snapshot] #{} saved {} MiB to {}", n, saved >> 20, rex::path_to_utf8(path));
 }
 
 }  // namespace

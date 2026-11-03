@@ -19,12 +19,10 @@ bool runWizardWindow(WizardConfig &config)
     if (const char *folder = std::getenv("DW5E_FIXTURE_GUI_FOLDER"))
         selection.choose(pathFromText(folder));
 #endif
-    if (!selection.prepare())
-    {
-        std::cerr << selection.error;
-        return false;
+    if(!prepareWizardSelection(config,selection)) {
+        std::cerr<<selection.error;return false;
     }
-    config.base.dataDir = selection.destination;
+    if(config.manageOnly) return true;
     SetupRun run(config.base);
     run.start();
     return run.wait();

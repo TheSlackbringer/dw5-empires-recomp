@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -34,6 +35,14 @@ int main(int argc, char **argv)
     std::string error;
     const auto self =
         executableDirectory(error) / pathFromText(pathText(pathFromText(args.at(0)).filename()));
+    if(mode=="hold") {
+        std::cout<<"ready"<<std::endl;
+        return std::cin.get()==EOF?5:0;
+    }
+    if (mode == "bootstrap-probe") {
+        write(reports / "bootstrap.json",nlohmann::json{{"args",args},{"cwd",pathText(fs::current_path())}}.dump());
+        const char *exit=std::getenv("DW5E_FIXTURE_EXIT");return exit?std::atoi(exit):0;
+    }
     if (mode == "codegen")
     {
         std::ifstream in(pathFromText(args.at(2)));

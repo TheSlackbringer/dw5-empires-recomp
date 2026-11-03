@@ -60,6 +60,8 @@ if(DW5E_BUILD_SETUP)
         setup/codegen.cpp
         setup/build_game.cpp
         setup/setup_pipeline.cpp
+        setup/installation.cpp
+        setup/wizard_storage.cpp
         setup/wizard_ui.cpp
         setup/wizard_main.cpp
     )
@@ -80,6 +82,13 @@ if(DW5E_BUILD_SETUP)
 
     if(WIN32)
         add_executable(dw5e_setup WIN32 ${DW5E_SETUP_SOURCES})
+        enable_language(C)
+        add_executable(dw5e_bootstrap WIN32 setup/bootstrap_win.c)
+        set_target_properties(dw5e_bootstrap PROPERTIES OUTPUT_NAME "DW5E-bootstrap")
+        if(MINGW)
+            target_link_options(dw5e_bootstrap PRIVATE -municode)
+        endif()
+        add_dependencies(dw5e_setup dw5e_bootstrap)
     else()
         add_executable(dw5e_setup ${DW5E_SETUP_SOURCES})
     endif()
@@ -249,7 +258,7 @@ if(WIN32)
 endif()
 target_include_directories(dw5e_install_fake_game PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(dw5e_launcher_selection_driver
-    tests/wizard_destination_fixture.cpp setup/wizard_main.cpp
+    tests/wizard_destination_fixture.cpp setup/wizard_main.cpp setup/wizard_storage.cpp setup/installation.cpp
     setup/xdvdfs.cpp setup/install_state.cpp setup/install_location.cpp setup/setup_layout.cpp
     setup/build_game.cpp setup/run_process.cpp setup/codegen.cpp setup/setup_pipeline.cpp)
 target_include_directories(dw5e_launcher_selection_driver PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/setup)
@@ -276,3 +285,24 @@ add_executable(dw5e_host_unicode_test tests/host_unicode_test.cpp)
 target_link_libraries(dw5e_host_unicode_test PRIVATE rex::runtime)
 rexglue_apply_target_settings(dw5e_host_unicode_test)
 add_test(NAME host_unicode_paths_tests COMMAND dw5e_host_unicode_test)
+
+add_executable(dw5e_storage_policy_test tests/storage_policy_test.cpp setup/installation.cpp setup/install_location.cpp setup/install_state.cpp)
+target_include_directories(dw5e_storage_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(dw5e_storage_policy_test PRIVATE Threads::Threads)
+if(WIN32)
+    target_link_libraries(dw5e_storage_policy_test PRIVATE shell32)
+endif()
+add_test(NAME storage_policy_tests COMMAND dw5e_storage_policy_test)
+add_executable(dw5e_storage_default_test tests/storage_default_test.cpp setup/install_location.cpp)
+target_include_directories(dw5e_storage_default_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(WIN32)
+    target_link_libraries(dw5e_storage_default_test PRIVATE shell32)
+endif()
+add_test(NAME storage_default_tests COMMAND dw5e_storage_default_test)
+set_tests_properties(storage_default_tests PROPERTIES ENVIRONMENT "DW5E_DATA_DIR=")
+
+if(WIN32 AND Python3_Interpreter_FOUND AND CMAKE_HOST_SYSTEM_NAME STREQUAL CMAKE_SYSTEM_NAME)
+    add_test(NAME bootstrap_tests COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/bootstrap_test.py
+        --bootstrap $<TARGET_FILE:dw5e_bootstrap> --child $<TARGET_FILE:dw5e_install_fake_game>
+        --out ${CMAKE_CURRENT_BINARY_DIR}/bootstrap-test)
+endif()

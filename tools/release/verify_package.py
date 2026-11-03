@@ -25,15 +25,22 @@ def validate_linux_icon(root):
         raise SystemExit("AppDir root needs the PNG icon dw5e.png for .DirIcon (an SVG is not accepted)")
 
 
-def validate_package(root, windows):
+def package_payload(root):
     root = Path(root)
+    nested = root / "game-files"
+    return nested if (nested / "app/CMakeLists.txt").is_file() else root
+
+
+def validate_package(root, windows):
+    outer = Path(root)
+    root = package_payload(outer)
     required = [
         "BUILD_ID", "app/CMakeLists.txt", "app/dw5e_manifest.toml",
         "rexglue-sdk/CMakeLists.txt",
     ]
     if windows:
         required += [
-            "DW5E.exe", "tools/rexglue.exe", "tools/cmake/bin/cmake.exe",
+            ("launcher/DW5E.exe" if root != outer else "DW5E.exe"), "tools/rexglue.exe", "tools/cmake/bin/cmake.exe",
             "tools/ninja.exe", "tools/windows/llvm-mingw.cmake",
             "tools/llvm-mingw/bin/x86_64-w64-mingw32-clang.exe",
             "tools/llvm-mingw/bin/x86_64-w64-mingw32-clang++.exe",
@@ -55,6 +62,8 @@ def validate_package(root, windows):
             "tools/clang/sysroot/lib64/ld-linux-x86-64.so.2",
         ]
     missing = [name for name in required if not (root / name).is_file()]
+    if windows and not (outer / "DW5E.exe").is_file():
+        missing.append("DW5E.exe (outer launcher)")
     if not windows and not any((root / "tools/clang/lib").glob("python3.*/os.py")):
         missing.append("tools/clang/lib/python3.*/os.py")
     if missing:
@@ -66,6 +75,7 @@ def validate_package(root, windows):
 
 
 def package_environment(root, windows):
+    root = package_payload(root)
     tools = root / "tools"
     env = os.environ.copy()
     # The release compiler must not inherit target headers/libraries from the host.
@@ -89,7 +99,8 @@ def package_environment(root, windows):
 def smoke_package(root, windows):
     if windows != (os.name == "nt"):
         raise SystemExit("native tool smoke checks must run on the target operating system")
-    root = Path(root).resolve()
+    outer = Path(root).resolve()
+    root = package_payload(outer)
     tools = root / "tools"
     env = package_environment(root, windows)
     compiler_root = tools / ("llvm-mingw" if windows else "clang")
@@ -100,6 +111,7 @@ def smoke_package(root, windows):
         print("+", " ".join(map(str, command)), flush=True)
         subprocess.run(list(map(str, command)), cwd=cwd, env=env, check=True, timeout=300)
 
+    run([outer / ("DW5E.exe" if windows else "DW5E"), "--help"])
     run([tools / f"rexglue{suffix}", "--help"])
     run([cmake, "--version"])
     run([tools / f"ninja{suffix}", "--version"])

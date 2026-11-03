@@ -37,13 +37,13 @@ Release packages are **builders**: they bundle the setup wizard, compiler tools,
 3. **First launch:** When prompted, select your `dw5e.iso`. The setup wizard verifies your disc, extracts assets, translates Xenon code, and compiles the native executable (~2–4 minutes).
 4. **Subsequent launches:** The game boots instantly (<1 second).
 
-By default, the installation stays **beside `DW5E.exe` or the original AppImage**. Setup shows an editable destination and **Choose folder**; a custom choice is remembered in `dw5e-install.json` beside the launcher. There is no automatic fallback location. The release folder must be writable to remember a choice.
+The installation defaults to **`game-files/` beside `DW5E.exe` or the original AppImage**. Packaged Windows tools/sources and generated game/build/cache/log files are kept inside that folder; Linux copies its writable builder there from the AppImage. Setup shows an editable destination and **Choose folder**. A custom choice can be remembered in `dw5e-install.json` beside the launcher; explicit `--data-dir`/`DW5E_DATA_DIR` overrides apply to one run.
 
-Keep the complete installation together when moving it on the same platform. Update release files in place, preserving `dw5e-install.json`, game files, saves, settings and caches. A required rebuild uses the installed game files without another ISO extraction. Console setup supports `--data-dir <folder>`; precedence is that option, `DW5E_DATA_DIR`, remembered choice, then the launcher folder. Explicit invocation overrides do not replace the remembered choice.
+First setup offers **On this PC (recommended)** or **With the game (portable)** for saves/settings. Windows normal mode uses `%LOCALAPPDATA%/DW5E/user-data` and `%LOCALAPPDATA%/DW5E/config`; Linux uses the XDG data/config directories (`~/.local/share/dw5e/user-data`, `~/.config/dw5e/config` by default). Portable mode keeps both in `game-files/user-data`. The selected mode belongs to the installation and survives updates.
 
-For an older installation, keep the original as a backup and copy its contents into the new destination before starting the new launcher. Old locations were `%LOCALAPPDATA%\DW5E` on Windows and `$XDG_DATA_HOME/dw5e` (normally `~/.local/share/dw5e`) on Linux. Keep new release files on name conflicts; the old generated root manifest is not needed. Select the destination if it is external. Nothing is moved or deleted automatically.
+Use **Manage installation** (`--manage`, or hold Shift while opening the Windows launcher) to switch mode with the game closed. Saves/settings/achievements are copied and verified, originals are retained, and conflicting progress requires an explicit choice. Updates preserve `game-files`, installation metadata and user data. A fresh download checks local/recorded/nearby installations and offers **Use existing installation** when needed; multiple candidates require selection. There are no registry entries or whole-drive scans.
 
----
+For a legacy flat/AppData installation, **Import into game-files** copies the installed game, dependencies and user data while keeping the original as a backup. Rebuilds reuse installed files without an ISO. Console management supports `--save-mode normal|portable`, `--save-conflict source|destination`, `--import-installation <folder>` and read-only `--status`.
 
 ## Controls
 

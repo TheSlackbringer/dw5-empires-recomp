@@ -46,9 +46,9 @@ int main()
     bool explicitOverride = false;
     std::string error;
     env("");
-    check(resolveInstallLocation(launcher, {}, result, explicitOverride, error) && result == launcher &&
+    check(resolveInstallLocation(launcher, {}, result, explicitOverride, error) && result == launcher / "game-files" &&
               !explicitOverride,
-          "missing configuration uses launcher folder");
+          "missing configuration uses game-files beneath launcher");
     InstallFolderSelection selection{launcher, launcher};
     check(selection.choose({}) && selection.destination == launcher,
           "cancelled folder picker preserves selection");
