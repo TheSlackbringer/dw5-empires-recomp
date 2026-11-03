@@ -36,4 +36,7 @@ bool syncDirectory(const std::filesystem::path &source, const std::filesystem::p
 // invalidation caused by random AppImage FUSE mount points (/tmp/.mount_xxxxxx) (commit 553f229).
 bool prepareLinuxBuildRoot(const std::filesystem::path &root, const std::filesystem::path &data, std::filesystem::path &buildRoot, std::string &error);
 
+// Give a new branded installation its own launcher and release payload.
+bool installReleaseLauncher(std::filesystem::path &root, const std::filesystem::path &data, std::string &error);
+
 } // namespace dw5e::setup

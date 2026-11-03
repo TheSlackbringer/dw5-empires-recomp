@@ -54,7 +54,10 @@ int main()
     const auto root = scratch / pathFromText("release ø 測試") / "game-files";
     const auto games = scratch / "Games";
     fs::create_directories(games);
-    check(newInstallationRoot(games) == games / "DW5E", "custom folder gets a dedicated DW5E child");
+    check(newInstallationRoot(games) == games / "DW5E-Recomp/game-files",
+          "custom parent gets a self-contained DW5E-Recomp installation");
+    check(newInstallationRoot(games / "DW5E-Recomp") == games / "DW5E-Recomp/game-files",
+          "selecting the branded folder does not create a second branded folder");
     check(newInstallationRoot(games / "DW5E") == games / "DW5E" && newInstallationRoot(root) == root,
           "dedicated folders do not get nested");
     installed(games / "DW5E");

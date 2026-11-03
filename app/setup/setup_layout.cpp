@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <iterator>
 #include <vector>
+#include <chrono>
+#include <cstdlib>
 
 namespace dw5e::setup {
 
@@ -147,6 +149,71 @@ bool syncDirectory(const fs::path &source, const fs::path &target, std::string &
         it.increment(ec);
         if (ec) return fail("cannot read directory", source);
     }
+    return true;
+}
+
+bool installReleaseLauncher(fs::path &root, const fs::path &data, std::string &error)
+{
+    const auto folder = data.parent_path();
+#ifdef _WIN32
+    if (_wcsicmp(data.filename().c_str(), L"game-files") != 0 ||
+        _wcsicmp(folder.filename().c_str(), L"DW5E-Recomp") != 0)
+#else
+    if (data.filename() != "game-files" || folder.filename() != "DW5E-Recomp")
+#endif
+        return true;
+
+    std::error_code ec;
+    const auto fail = [&](const fs::path &path) {
+        error = "Cannot install launcher file " + pathText(path) + ": " + ec.message();
+        return false;
+    };
+    const auto copy = [&](const fs::path &source, const fs::path &target) {
+        if (fs::is_regular_file(target, ec) && sameContents(source, target, ec))
+            return true;
+        const auto temporary = folder / (".dw5e-launcher-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+        if (!fs::create_directory(temporary, ec)) {
+            if (!ec) ec = std::make_error_code(std::errc::file_exists);
+            return fail(temporary);
+        }
+        const auto staged = temporary / target.filename();
+        fs::copy_file(source, staged, fs::copy_options::none, ec);
+        if (!ec)
+            fs::rename(staged, target, ec);
+        const bool copied = !ec || fail(target);
+        std::error_code cleanup;
+        fs::remove(staged, cleanup);
+        fs::remove(temporary, cleanup);
+        return copied;
+    };
+#ifdef _WIN32
+    if (root.filename() != "game-files" || fs::equivalent(root, data, ec))
+        return true;
+    for (const auto *item : {"launcher", "app", "patches", "tools", "rexglue-sdk", "LICENSES"})
+        if (!syncDirectory(root / item, data / item, error, true, folder))
+            return false;
+    for (const auto *item : {"dw5e_manifest.toml", "LICENSE", "README.md", "BUILD_ID"})
+        if (!copy(root / item, data / item))
+            return false;
+    if (!copy(root.parent_path() / "README.txt", folder / "README.txt") ||
+        !copy(root.parent_path() / "DW5E.exe", folder / "DW5E.exe"))
+        return false;
+    root = data;
+#else
+    const char *image = std::getenv("APPIMAGE");
+    if (!image || !*image)
+        return true;
+    const auto source = pathFromText(image);
+    const auto launcher = folder / "DW5E.AppImage";
+    if (fs::equivalent(source, launcher, ec))
+        return true;
+    if (!copy(root / "README.txt", folder / "README.txt") || !copy(source, launcher))
+        return false;
+    fs::permissions(launcher, fs::perms::owner_exec, fs::perm_options::add, ec);
+    if (ec)
+        return fail(launcher);
+#endif
     return true;
 }
 

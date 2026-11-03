@@ -49,7 +49,8 @@ Play
 Your files
   Installation files stay in game-files beside DW5E.exe by default. This folder holds
   extracted game files, the compiled game, generated code, cache, logs, tools and sources.
-  Setup shows the destination; use Choose folder for another location.
+  Choose another parent folder to install DW5E-Recomp there with its own DW5E.exe.
+  Start the installed copy from that folder.
   On this PC remembers the folder in the DW5E user configuration directory.
   Older dw5e-install.json files are read for compatibility.
 
@@ -118,8 +119,9 @@ Play
   4. Later starts open the game directly without rebuilding.
 
 Your files
-  Installation files stay in game-files beside the original AppImage by default,
-  outside its temporary mount. Use Choose folder for another destination.
+  Setup creates DW5E-Recomp beside the download or inside the parent you choose.
+  Open DW5E.AppImage inside the installed folder. It includes its own README and
+  game-files folder outside the temporary AppImage mount.
   game-files contains extracted game data, build, generated code, cache, logs and the
   writable builder (sources/tools copied from the AppImage). A custom choice can be
   remembered in the DW5E user configuration directory for On this PC mode.
@@ -415,7 +417,7 @@ def windows(build, recomp_build, test):
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for p in sorted(stage.rglob('*')):
             if p.is_file():
-                z.write(p, Path(name) / p.relative_to(stage))
+                z.write(p, Path('DW5E-Recomp') / p.relative_to(stage))
 
     (dist / f'{name}.zip.sha256').write_text(f'{sha256(archive)}  {archive.name}\n')
     files = sum(1 for p in stage.rglob('*') if p.is_file())

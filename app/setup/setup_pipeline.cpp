@@ -186,6 +186,23 @@ void SetupRun::run()
     fs::create_directories(logDir, ec);
     if (ec) { fail("Cannot create setup logs at " + pathText(logDir) + ": " + ec.message()); return; }
 
+#ifdef _WIN32
+    const auto packageRoot = m_options.root;
+#endif
+    if (!installReleaseLauncher(m_options.root, dataDir, destinationError)) {
+        fail(destinationError); return;
+    }
+#ifdef _WIN32
+    if (packageRoot != m_options.root) {
+        SetupLayout layout;
+        if (!findLayout(m_options.root, true, layout, destinationError)) {
+            fail(destinationError); return;
+        }
+        m_options.recompiler = layout.recompiler;
+        m_options.tools = layout.tools;
+    }
+#endif
+
 #ifndef _WIN32
     if (fs::is_regular_file(m_options.root / "BUILD_ID", ec))
     {

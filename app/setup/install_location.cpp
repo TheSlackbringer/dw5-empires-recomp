@@ -196,9 +196,11 @@ fs::path launcherDirectory(std::string &error)
     // The Windows package keeps its real wizard and DLLs in the payload.
 #ifdef _WIN32
     const bool packaged = _wcsicmp(directory.filename().c_str(),L"launcher")==0 &&
-        _wcsicmp(directory.parent_path().filename().c_str(),L"game-files")==0;
+        (_wcsicmp(directory.parent_path().filename().c_str(),L"DW5E-Recomp")==0 ||
+         _wcsicmp(directory.parent_path().filename().c_str(),L"game-files")==0);
 #else
-    const bool packaged = directory.filename()=="launcher" && directory.parent_path().filename()=="game-files";
+    const bool packaged = directory.filename()=="launcher" &&
+        (directory.parent_path().filename()=="DW5E-Recomp" || directory.parent_path().filename()=="game-files");
 #endif
     if (packaged && fs::is_regular_file(directory.parent_path() / "BUILD_ID"))
         return directory.parent_path().parent_path();
@@ -238,8 +240,20 @@ bool resolveInstallLocation(const fs::path &launcher, const fs::path &commandLin
     if (!exists)
     {
         const auto child = launcher / "game-files";
-        destination = fs::is_regular_file(child / "game/installed.txt") ? child :
-            fs::is_regular_file(launcher / "game/installed.txt") ? launcher : child;
+        const auto branded = launcher / "DW5E-Recomp/game-files";
+        if (fs::is_regular_file(child / "game/installed.txt"))
+            destination = child;
+        else if (fs::is_regular_file(launcher / "game/installed.txt"))
+            destination = launcher;
+        else if (fs::is_regular_file(branded / "game/installed.txt"))
+            destination = branded;
+#ifndef _WIN32
+        else if (const char *image = std::getenv("APPIMAGE"); image && *image &&
+                 launcher.filename() != "DW5E-Recomp")
+            destination = branded;
+#endif
+        else
+            destination = child;
         return true;
     }
     if (!fs::is_regular_file(config, ec) || fs::file_size(config, ec) > 65536 || ec)
@@ -314,7 +328,8 @@ bool rememberInstallLocation(const fs::path &launcher, const fs::path &destinati
     const auto text = nlohmann::json{{"version", 1}, {"data_dir", pathText(stored)}}.dump(2) + "\n";
     const auto config = base / "dw5e-install.json";
     // The fixed default needs no loose sidecar in a newly extracted release.
-    if (chosen == base / "game-files" && !fs::exists(config)) return true;
+    if ((chosen == base / "game-files" || chosen == base / "DW5E-Recomp/game-files") && !fs::exists(config))
+        return true;
     return writeAtomicText(config, text, error);
 }
 bool writeAtomicText(const fs::path &config, const std::string &text, std::string &error)

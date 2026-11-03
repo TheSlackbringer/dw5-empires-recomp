@@ -815,8 +815,12 @@ bool runWizardWindow(WizardConfig &config)
                 if (checkedFolder != folderInput)
                     checkFolder();
                 showError(folderError);
-                if (newDestination && !folderChoice.empty())
-                    ImGui::TextWrapped("Install to: %s", pathText(folderChoice).c_str());
+                if (newDestination && !folderChoice.empty()) {
+                    const auto shown = folderChoice.filename() == "game-files" &&
+                        folderChoice.parent_path().filename() == "DW5E-Recomp"
+                        ? folderChoice.parent_path() : folderChoice;
+                    ImGui::TextWrapped("Install to: %s", pathText(shown).c_str());
+                }
                 if (createFolder)
                     ImGui::TextWrapped("This folder does not exist yet. DW5E will create it when you start installation.");
                 if (newDestination && folderHasInstallation)

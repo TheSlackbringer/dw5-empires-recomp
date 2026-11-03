@@ -342,6 +342,8 @@ fs::path existingInstallationRoot(const fs::path &selected)
 {
     if (verified(selected))
         return resolvedPath(selected);
+    if (verified(selected / "DW5E-Recomp/game-files"))
+        return resolvedPath(selected / "DW5E-Recomp/game-files");
     if (verified(selected / "game-files"))
         return resolvedPath(selected / "game-files");
     if (verified(selected / "DW5E"))
@@ -356,10 +358,14 @@ fs::path newInstallationRoot(const fs::path &selected)
 #ifdef _WIN32
     const bool dedicated = _wcsicmp(name.c_str(), L"DW5E") == 0 ||
                            _wcsicmp(name.c_str(), L"game-files") == 0;
+    const bool branded = _wcsicmp(name.c_str(), L"DW5E-Recomp") == 0;
 #else
     const bool dedicated = name == "DW5E" || name == "game-files";
+    const bool branded = name == "DW5E-Recomp";
 #endif
-    return dedicated || fs::is_regular_file(root / "install.json", ec) ? root : root / "DW5E";
+    if (dedicated || fs::is_regular_file(root / "install.json", ec))
+        return root;
+    return (branded ? root : root / "DW5E-Recomp") / "game-files";
 }
 fs::path normalUserDataDirectory()
 {
@@ -487,6 +493,9 @@ bool discoverInstallations(const fs::path &launcher, std::vector<fs::path> &foun
     add(launcher / "game-files");
     if (!found.empty())
         return true;
+    add(launcher / "DW5E-Recomp/game-files");
+    if (!found.empty())
+        return true;
     add(launcher);
     if (!found.empty())
         return true;
@@ -540,6 +549,7 @@ bool discoverInstallations(const fs::path &launcher, std::vector<fs::path> &foun
             if (!it->is_directory(ec) || it->is_symlink(ec))
                 continue;
             ++inspected;
+            add(it->path() / "DW5E-Recomp/game-files");
             add(it->path() / "game-files");
             add(it->path() / "DW5E");
             add(it->path());
@@ -555,6 +565,7 @@ bool discoverInstallations(const fs::path &launcher, std::vector<fs::path> &foun
                     if (!child->is_directory(innerError) || child->is_symlink(innerError))
                         continue;
                     ++inspected;
+                    add(child->path() / "DW5E-Recomp/game-files");
                     add(child->path() / "game-files");
                     add(child->path());
                 }

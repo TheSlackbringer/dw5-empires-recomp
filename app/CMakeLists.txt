@@ -273,10 +273,14 @@ if(WIN32)
 endif()
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND AND TARGET dw5e_setup AND CMAKE_HOST_SYSTEM_NAME STREQUAL CMAKE_SYSTEM_NAME)
+    if(WIN32)
+        set(bootstrap_test_args --bootstrap $<TARGET_FILE:dw5e_bootstrap>)
+    endif()
     add_test(NAME install_launcher_integration_tests COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/launcher_install_test.py
         --launcher $<TARGET_FILE:dw5e_setup> --game $<TARGET_FILE:dw5e_install_fake_game>
         --selection-driver $<TARGET_FILE:dw5e_launcher_selection_driver>
+        ${bootstrap_test_args}
         --out ${CMAKE_CURRENT_BINARY_DIR}/install-launcher-test)
 endif()
 

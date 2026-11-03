@@ -511,6 +511,49 @@ class LauncherInstallTests(unittest.TestCase):
         self.assertFalse(sidecar.exists())
         self.assertEqual(P(json.loads(self.launch('--status').stdout)['installation']), selected)
 
+    def test_custom_install_launcher_works_after_removing_download(self):
+        import shlex
+
+        download = self.root / 'download'
+        download.mkdir()
+        installed = self.root / 'chosen parent' / 'DW5E-Recomp'
+        data = installed / 'game-files'
+        self.installed(data)
+        put(data / 'install.json', json.dumps({'version': 1, 'save_mode': 'portable'}))
+        if os.name == 'nt':
+            self.assertIsNotNone(CONFIG.bootstrap, 'native Windows bootstrap fixture')
+            payload = download / 'game-files'
+            shutil.copytree(self.package, payload)
+            wizard = payload / 'launcher'
+            wizard.mkdir()
+            for file in self.package.iterdir():
+                if file.suffix in ('.exe', '.dll'):
+                    shutil.copy2(file, wizard / file.name)
+            self.driver = wizard / self.driver.name
+            for name in ('LICENSE', 'README.md'):
+                put(payload / name, 'fixture documentation')
+            put(download / 'README.txt', 'fixture documentation')
+            source = download / 'DW5E.exe'
+            shutil.copy2(CONFIG.bootstrap, source)
+        else:
+            put(self.package / 'README.txt', 'fixture documentation')
+            source = download / 'downloaded.AppImage'
+            put(source, '#!/bin/sh\nexport APPIMAGE="$0"\nexec ' +
+                shlex.quote(str(self.launcher)) + ' "$@"\n')
+            source.chmod(0o755)
+            self.env['APPIMAGE'] = str(source)
+
+        launcher = installed / ('DW5E.exe' if os.name == 'nt' else 'DW5E.AppImage')
+        self.env['DW5E_FIXTURE_GUI_FOLDER'] = str(data)
+        self.launch('--no-window', '--rebuild', driver=True)
+        self.assertEqual(launcher.read_bytes(), source.read_bytes())
+        self.assertEqual((installed / 'README.txt').read_text(), 'fixture documentation')
+        shutil.rmtree(download)
+        self.env.pop('APPIMAGE', None)
+        self.launcher = launcher
+        self.check_game(self.launch(game=True), data, data / 'user-data', data / 'user-data')
+        self.launch('--manage', '--no-window', '--save-mode', 'portable')
+
     def test_portable_copy_to_new_release_retains_mode_without_user_folder_writes(self):
         installed=self.package/'game-files';self.installed(installed)
         put(installed/'install.json',json.dumps({'version':1,'save_mode':'portable'}))
@@ -578,6 +621,7 @@ if __name__ == '__main__':
     parser.add_argument('--selection-driver', required=True, type=P)
     parser.add_argument('--out', required=True, type=P)
     parser.add_argument('--runtime-bin', type=P)
+    parser.add_argument('--bootstrap', type=P)
     CONFIG = parser.parse_args()
     CONFIG.launcher = CONFIG.launcher.resolve()
     CONFIG.game = CONFIG.game.resolve()
