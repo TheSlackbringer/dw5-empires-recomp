@@ -278,6 +278,10 @@ bool runWizardWindow(WizardConfig &config)
               : Page::Disc;
     Page returnFromOptions = page;
     bool choosingInstallDestination = false;
+    const auto visibleInstallFolder = [](const fs::path &path) {
+        return path.filename() == "game-files" && path.parent_path().filename() == "DW5E-Recomp"
+            ? path.parent_path() : path;
+    };
     const auto openOptions = [&](bool installDestination = false) {
         folderDialog = std::make_shared<DialogState>();
         folderError.clear();
@@ -287,7 +291,8 @@ bool runWizardWindow(WizardConfig &config)
         folderHasInstallation = false;
         choosingInstallDestination = installDestination;
         const auto path = page == Page::Disc && !installDestination
-            ? std::string{} : pathText(destination.destination);
+            ? std::string{} : pathText(installDestination ? visibleInstallFolder(destination.destination)
+                                                           : destination.destination);
         std::snprintf(folderInput, sizeof(folderInput), "%s", path.c_str());
         returnFromOptions = page;
         page = Page::Other;
@@ -795,7 +800,8 @@ bool runWizardWindow(WizardConfig &config)
                         folderChoice = existing;
                         folderHasInstallation = true;
                     } else if (newDestination && installState(path) != InstallState::Installed) {
-                        const auto target = destination.explicitOverride ? path : newInstallationRoot(path);
+                        const auto target = destination.explicitOverride ? destination.destination
+                                                                         : newInstallationRoot(path);
                         ec.clear();
                         const auto targetStatus = fs::status(target, ec);
                         if ((ec && ec != std::errc::no_such_file_or_directory) ||
@@ -804,7 +810,7 @@ bool runWizardWindow(WizardConfig &config)
                             folderError = "Cannot install to: " + pathText(target);
                         } else {
                             folderChoice = target;
-                            createFolder = !fs::exists(targetStatus);
+                            createFolder = !fs::exists(visibleInstallFolder(target), ec);
                         }
                     } else if (!fs::exists(status)) {
                         folderError = "This folder does not exist: " + pathText(path);
@@ -815,12 +821,8 @@ bool runWizardWindow(WizardConfig &config)
                 if (checkedFolder != folderInput)
                     checkFolder();
                 showError(folderError);
-                if (newDestination && !folderChoice.empty()) {
-                    const auto shown = folderChoice.filename() == "game-files" &&
-                        folderChoice.parent_path().filename() == "DW5E-Recomp"
-                        ? folderChoice.parent_path() : folderChoice;
-                    ImGui::TextWrapped("Install to: %s", pathText(shown).c_str());
-                }
+                if (newDestination && !folderChoice.empty())
+                    ImGui::TextWrapped("Install to: %s", pathText(visibleInstallFolder(folderChoice)).c_str());
                 if (createFolder)
                     ImGui::TextWrapped("This folder does not exist yet. DW5E will create it when you start installation.");
                 if (newDestination && folderHasInstallation)
