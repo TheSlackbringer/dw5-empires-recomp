@@ -92,16 +92,16 @@ class WindowsPackageTest(unittest.TestCase):
             prefix = "DW5E-Recomp/"
             directories = {name[len(prefix):].split("/")[0] for name in names
                            if "/" in name[len(prefix):]}
-            self.assertEqual(directories, {"game-files"})
+            self.assertEqual(directories, {"dw5e-data"})
             self.assertEqual(contents.read(prefix + "DW5E.exe"), b"MZsynthetic bootstrap")
-            self.assertEqual(contents.read(prefix + "game-files/launcher/DW5E.exe"), b"MZsynthetic setup")
+            self.assertEqual(contents.read(prefix + "dw5e-data/launcher/DW5E.exe"), b"MZsynthetic setup")
             self.assertFalse(any("user-data/" in name or name.endswith("/install.json") for name in names))
 
     def test_relwithdebinfo_compiler_is_bundled_under_canonical_name(self):
         self.compiler("rexgluerd.exe")
         archive = self.package()
         with zipfile.ZipFile(archive) as contents:
-            self.assertEqual(contents.read("DW5E-Recomp/game-files/tools/rexglue.exe"),
+            self.assertEqual(contents.read("DW5E-Recomp/dw5e-data/tools/rexglue.exe"),
                              b"MZsynthetic translator")
 
     def test_release_compiler_and_checksum_are_preserved(self):
@@ -118,7 +118,7 @@ class WindowsPackageTest(unittest.TestCase):
         (self.build / "setup/DW5E.exe").write_bytes(b"MZsynthetic setup")
         self.compiler("rexglue.exe")
         with zipfile.ZipFile(self.package()) as contents:
-            self.assertEqual(contents.read("DW5E-Recomp/game-files/launcher/DW5E.exe"), b"MZsynthetic setup")
+            self.assertEqual(contents.read("DW5E-Recomp/dw5e-data/launcher/DW5E.exe"), b"MZsynthetic setup")
 
     def test_missing_compiler_stops_packaging(self):
         with self.assertRaisesRegex(SystemExit, "(?i)recompiler|rexglue"):

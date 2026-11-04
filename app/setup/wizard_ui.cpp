@@ -279,7 +279,8 @@ bool runWizardWindow(WizardConfig &config)
     Page returnFromOptions = page;
     bool choosingInstallDestination = false;
     const auto visibleInstallFolder = [](const fs::path &path) {
-        return path.filename() == "game-files" && path.parent_path().filename() == "DW5E-Recomp"
+        return (path.filename() == "dw5e-data" || path.filename() == "game-files") &&
+               path.parent_path().filename() == "DW5E-Recomp"
             ? path.parent_path() : path;
     };
     const auto openOptions = [&](bool installDestination = false) {
@@ -635,10 +636,11 @@ bool runWizardWindow(WizardConfig &config)
                 showError(destination.error);
                 showError(metadataError);
                 showError(actionError);
-                const auto copyDestination = config.launcherDir / "game-files";
+                const auto copyDestination = config.launcherDir / "dw5e-data";
                 if (canManage && !destination.explicitOverride && !config.launcherDir.empty() &&
                     destination.destination != copyDestination &&
-                    installState(copyDestination) != InstallState::Installed) {
+                    installState(copyDestination) != InstallState::Installed &&
+                    installState(config.launcherDir / "game-files") != InstallState::Installed) {
                     ImGui::Separator();
                     ImGui::TextWrapped("Taking DW5E to another drive or PC? Make a second copy of this installation.");
                     if (ImGui::Button(copyLabel, ImVec2(0, buttonHeight))) {

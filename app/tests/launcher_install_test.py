@@ -272,12 +272,12 @@ class LauncherInstallTests(unittest.TestCase):
 
     def test_opening_launcher_leaves_no_unused_default_folder(self):
         self.launch('--no-window', expected=1)
-        self.assertFalse((self.package / 'game-files').exists())
+        self.assertFalse((self.package / 'dw5e-data').exists())
         selected = self.root / 'chosen elsewhere'
         self.installed(selected)
         self.env['DW5E_FIXTURE_GUI_FOLDER'] = str(selected)
         self.check_game(self.launch(driver=True, game=True), selected)
-        self.assertFalse((self.package / 'game-files').exists())
+        self.assertFalse((self.package / 'dw5e-data').exists())
 
     def test_overrides_and_external_choice_survive_launcher_only_move(self):
         selected = self.root / 'remembered'
@@ -401,7 +401,7 @@ class LauncherInstallTests(unittest.TestCase):
         self.launch('--manage', '--no-window', '--import-installation', source,
                     '--save-mode', 'portable')
 
-        copied = self.package / 'game-files'
+        copied = self.package / 'dw5e-data'
         self.assertEqual(hashes(source), original)
         self.assertEqual((copied / 'game/files/default.xex').read_bytes(),
                          (source / 'game/files/default.xex').read_bytes())
@@ -430,7 +430,7 @@ class LauncherInstallTests(unittest.TestCase):
         self.expect_user(config/'installations.json', contents)
 
     def test_normal_fresh_zip_and_portable_switch_preserve_progress(self):
-        installed = self.package/'game-files'
+        installed = self.package/'dw5e-data'
         self.installed(installed)
         put(installed/'install.json', json.dumps({'version':1,'save_mode':'normal'}))
         user, config = self.normal_paths()
@@ -440,10 +440,10 @@ class LauncherInstallTests(unittest.TestCase):
         self.check_game(self.launch(game=True), installed, user, config)
         self.expect_index([installed], installed)
         fresh = self.root/'fresh download ø'
-        shutil.copytree(self.package, fresh, ignore=shutil.ignore_patterns('game-files','dw5e-install.json'))
+        shutil.copytree(self.package, fresh, ignore=shutil.ignore_patterns('dw5e-data','dw5e-install.json'))
         self.package=fresh;self.launcher=fresh/self.launcher.name;self.driver=fresh/self.driver.name
         self.check_game(self.launch(game=True), installed, user, config)
-        self.assertFalse((fresh/'game-files').exists(), 'fresh ZIP reused the discovered installation')
+        self.assertFalse((fresh/'dw5e-data').exists(), 'fresh ZIP reused the discovered installation')
         self.launch('--manage','--no-window','--save-mode','portable')
         self.assertEqual(json.loads((installed/'install.json').read_text(encoding='utf-8'))['save_mode'],'portable')
         portable = installed/'user-data'
@@ -466,7 +466,7 @@ class LauncherInstallTests(unittest.TestCase):
         self.check_game(self.launch(game=True),installed,user,config)
 
     def test_mode_switch_rejects_a_running_native_game(self):
-        installed=self.package/'game-files';self.installed(installed)
+        installed=self.package/'dw5e-data';self.installed(installed)
         put(installed/'install.json',json.dumps({'version':1,'save_mode':'portable'}))
         put(installed/'user-data/save/progress','live progress')
         metadata=(installed/'install.json').read_bytes()
@@ -512,17 +512,24 @@ class LauncherInstallTests(unittest.TestCase):
         self.assertEqual(P(json.loads(self.launch('--status').stdout)['installation']), selected)
 
     def test_custom_install_launcher_works_after_removing_download(self):
+        self.check_custom_install_launcher('dw5e-data')
+
+    def test_legacy_portable_install_works_after_updating_its_launcher(self):
+        self.check_custom_install_launcher('game-files')
+
+    def check_custom_install_launcher(self, data_folder):
         import shlex
 
         download = self.root / 'download'
         download.mkdir()
         installed = self.root / 'chosen parent' / 'DW5E-Recomp'
-        data = installed / 'game-files'
+        data = installed / data_folder
         self.installed(data)
         put(data / 'install.json', json.dumps({'version': 1, 'save_mode': 'portable'}))
+        put(data / 'user-data/save/progress', 'portable progress')
         if os.name == 'nt':
             self.assertIsNotNone(CONFIG.bootstrap, 'native Windows bootstrap fixture')
-            payload = download / 'game-files'
+            payload = download / 'dw5e-data'
             shutil.copytree(self.package, payload)
             wizard = payload / 'launcher'
             wizard.mkdir()
@@ -553,17 +560,20 @@ class LauncherInstallTests(unittest.TestCase):
         self.launcher = launcher
         self.check_game(self.launch(game=True), data, data / 'user-data', data / 'user-data')
         self.launch('--manage', '--no-window', '--save-mode', 'portable')
+        self.assertEqual((data / 'user-data/save/progress').read_text(), 'portable progress')
+        if data_folder == 'game-files':
+            self.assertFalse((installed / 'dw5e-data/game').exists(), 'legacy game data stays in place')
 
     def test_portable_copy_to_new_release_retains_mode_without_user_folder_writes(self):
-        installed=self.package/'game-files';self.installed(installed)
+        installed=self.package/'dw5e-data';self.installed(installed)
         put(installed/'install.json',json.dumps({'version':1,'save_mode':'portable'}))
         put(installed/'user-data/save/progress','portable-only progress')
         self.check_game(self.launch(game=True),installed,installed/'user-data',installed/'user-data')
         target=self.root/'new portable release'
         shutil.copytree(self.package,target)
         self.package=target;self.launcher=target/self.launcher.name;self.driver=target/self.driver.name
-        self.check_game(self.launch(game=True),target/'game-files',target/'game-files/user-data',target/'game-files/user-data')
-        self.assertEqual((target/'game-files/user-data/save/progress').read_text(encoding='utf-8'),'portable-only progress')
+        self.check_game(self.launch(game=True),target/'dw5e-data',target/'dw5e-data/user-data',target/'dw5e-data/user-data')
+        self.assertEqual((target/'dw5e-data/user-data/save/progress').read_text(encoding='utf-8'),'portable-only progress')
         self.assertEqual(hashes(self.home),self.original_user)
 
     def test_multiple_recorded_installations_require_selection(self):
@@ -575,7 +585,7 @@ class LauncherInstallTests(unittest.TestCase):
         self.expect_index([left,right])
         failed=self.launch('--no-window',expected=1)
         self.assertIn('Several existing',failed.stdout)
-        self.assertFalse((self.package/'game-files/game').exists())
+        self.assertFalse((self.package/'dw5e-data/game').exists())
         self.check_game(self.launch('--use-installation',left,game=True),left)
 
     def test_fresh_update_uses_the_last_used_installation(self):
@@ -592,14 +602,14 @@ class LauncherInstallTests(unittest.TestCase):
         self.expect_index([left, right], right)
 
         fresh = self.root / 'newly downloaded update'
-        shutil.copytree(self.package, fresh, ignore=shutil.ignore_patterns('dw5e-install.json', 'game-files'))
+        shutil.copytree(self.package, fresh, ignore=shutil.ignore_patterns('dw5e-install.json', 'dw5e-data'))
         self.package = fresh
         self.launcher = fresh / self.launcher.name
         self.driver = fresh / self.driver.name
         status = json.loads(self.launch('--status').stdout)
         self.assertEqual(P(status['installation']), right)
         self.check_game(self.launch(game=True), right, user, config)
-        self.assertFalse((fresh / 'game-files').exists())
+        self.assertFalse((fresh / 'dw5e-data').exists())
 
     @unittest.skipIf(os.name == 'nt', 'Linux AppImage discovery and mount lifetime need a Linux native host')
     def test_original_appimage_and_mount_lifetime(self):

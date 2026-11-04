@@ -156,10 +156,12 @@ bool installReleaseLauncher(fs::path &root, const fs::path &data, std::string &e
 {
     const auto folder = data.parent_path();
 #ifdef _WIN32
-    if (_wcsicmp(data.filename().c_str(), L"game-files") != 0 ||
+    if ((_wcsicmp(data.filename().c_str(), L"dw5e-data") != 0 &&
+         _wcsicmp(data.filename().c_str(), L"game-files") != 0) ||
         _wcsicmp(folder.filename().c_str(), L"DW5E-Recomp") != 0)
 #else
-    if (data.filename() != "game-files" || folder.filename() != "DW5E-Recomp")
+    if ((data.filename() != "dw5e-data" && data.filename() != "game-files") ||
+        folder.filename() != "DW5E-Recomp")
 #endif
         return true;
 
@@ -188,18 +190,21 @@ bool installReleaseLauncher(fs::path &root, const fs::path &data, std::string &e
         return copied;
     };
 #ifdef _WIN32
-    if (root.filename() != "game-files" || fs::equivalent(root, data, ec))
+    // A legacy installation keeps its game and saves in place. The new bootstrap
+    // always starts the wizard from the current package payload.
+    const auto payload = folder / "dw5e-data";
+    if (_wcsicmp(root.filename().c_str(), L"dw5e-data") != 0 || fs::equivalent(root, payload, ec))
         return true;
     for (const auto *item : {"launcher", "app", "patches", "tools", "rexglue-sdk", "LICENSES"})
-        if (!syncDirectory(root / item, data / item, error, true, folder))
+        if (!syncDirectory(root / item, payload / item, error, true, folder))
             return false;
     for (const auto *item : {"dw5e_manifest.toml", "LICENSE", "README.md", "BUILD_ID"})
-        if (!copy(root / item, data / item))
+        if (!copy(root / item, payload / item))
             return false;
     if (!copy(root.parent_path() / "README.txt", folder / "README.txt") ||
         !copy(root.parent_path() / "DW5E.exe", folder / "DW5E.exe"))
         return false;
-    root = data;
+    root = payload;
 #else
     const char *image = std::getenv("APPIMAGE");
     if (!image || !*image)

@@ -4,7 +4,7 @@ P=pathlib.Path
 class Bootstrap(unittest.TestCase):
     def test_native_bootstrap(self):
         with tempfile.TemporaryDirectory(dir=CONFIG.out) as directory:
-            root=P(directory)/'release ø 測試';inner=root/'game-files/launcher';inner.mkdir(parents=True)
+            root=P(directory)/'release ø 測試';inner=root/'dw5e-data/launcher';inner.mkdir(parents=True)
             shutil.copy2(CONFIG.bootstrap,root/'DW5E.exe');shutil.copy2(CONFIG.child,inner/'DW5E.exe')
             search=[CONFIG.child.parent,*[P(p) for p in os.environ.get('PATH','').split(os.pathsep) if p]]
             if CONFIG.runtime_bin:search.insert(0,CONFIG.runtime_bin)

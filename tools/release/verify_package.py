@@ -27,8 +27,11 @@ def validate_linux_icon(root):
 
 def package_payload(root):
     root = Path(root)
-    nested = root / "game-files"
-    return nested if (nested / "app/CMakeLists.txt").is_file() else root
+    for name in ("dw5e-data", "game-files"):
+        nested = root / name
+        if (nested / "app/CMakeLists.txt").is_file():
+            return nested
+    return root
 
 
 def validate_package(root, windows):

@@ -49,7 +49,7 @@ Play
 Your files
   The first-install wizard suggests C:\\Games\\DW5E-Recomp. Use Choose folder
   to select a different parent for DW5E-Recomp and its own DW5E.exe.
-  The game-files folder holds extracted game files, the compiled game, generated
+  The dw5e-data folder holds extracted game files, the compiled game, generated
   code, cache, logs, tools and sources.
   Start the installed copy from that folder.
   On this PC remembers the folder in the DW5E user configuration directory.
@@ -61,7 +61,7 @@ Saves and settings
   records its mode in install.json inside the game folder.
   On this PC uses %LOCALAPPDATA%/DW5E/user-data for saves/achievements and
   %LOCALAPPDATA%/DW5E/config for settings and a small installation-location record.
-  Portable uses game-files/user-data for both. The mode is remembered inside the
+  Portable uses dw5e-data/user-data for both. The mode is remembered inside the
   installation and is retained on updates; you are not asked to choose it again.
   Hold Shift when opening DW5E.exe, or run DW5E.exe --manage, to manage save location.
   Close the game before switching. Saves/settings are copied and verified; originals
@@ -74,7 +74,7 @@ Updating and existing installations
   if available. If several copies are found without a preference, choose one.
   You can browse for a different installed folder. Its save mode and saves are reused.
   A required rebuild uses installed game files without another ISO extraction.
-  Portable users should carry the complete launcher/game-files folder together.
+  Portable users should carry the complete launcher/dw5e-data folder together.
   Console: --data-dir <folder>, DW5E_DATA_DIR, --use-installation <folder>,
   --manage --save-mode normal|portable, --save-conflict source|destination, --status.
   Explicit path overrides apply to one invocation and do not replace remembered choices.
@@ -122,8 +122,8 @@ Play
 Your files
   Setup creates DW5E-Recomp beside the download. Use Choose folder to pick another parent.
   Open DW5E.AppImage inside the installed folder. It includes its own README and
-  game-files folder outside the temporary AppImage mount.
-  game-files contains extracted game data, build, generated code, cache, logs and the
+  dw5e-data folder outside the temporary AppImage mount.
+  dw5e-data contains extracted game data, build, generated code, cache, logs and the
   writable builder (sources/tools copied from the AppImage). A custom choice can be
   remembered in the DW5E user configuration directory for On this PC mode.
   Older dw5e-install.json files are read for compatibility.
@@ -134,14 +134,14 @@ Saves and settings
   records its mode in install.json inside the game folder.
   On this PC uses $XDG_DATA_HOME/dw5e/user-data (default ~/.local/share/dw5e/user-data)
   and $XDG_CONFIG_HOME/dw5e/config (default ~/.config/dw5e/config).
-  Portable uses game-files/user-data for both saves/achievements and settings.
+  Portable uses dw5e-data/user-data for both saves/achievements and settings.
   Mode is recorded inside the installation and retained on updates.
   Run the AppImage with --manage to change save location. Close the game first.
   Saves/settings are copied and verified with originals retained; conflicting progress
   requires an explicit choice of current or destination saves.
 
 Updating and existing installations
-  Replace the AppImage, keeping game-files, user-data and installation metadata.
+  Replace the AppImage, keeping dw5e-data, user-data and installation metadata.
   A fresh AppImage checks beside itself, then uses the last recorded installation
   if available. If several copies are found without a preference, choose one.
   You can browse for a different installed folder. Its save mode and saves are reused.
@@ -374,8 +374,8 @@ def windows(build, recomp_build, test):
     shutil.rmtree(stage, ignore_errors=True)
     stage.mkdir(parents=True)
 
-    # Only the native bootstrap and README are exposed outside game-files.
-    payload = stage / 'game-files'
+    # Only the native bootstrap and README are exposed outside dw5e-data.
+    payload = stage / 'dw5e-data'
     (payload / 'launcher').mkdir(parents=True)
     shutil.copy2(bootstrap, stage / 'DW5E.exe')
     shutil.copy2(launcher, payload / 'launcher/DW5E.exe')

@@ -51,12 +51,12 @@ int main()
     env("XDG_DATA_HOME", scratch / "data-home");
     std::string error;
     Installation install;
-    const auto root = scratch / pathFromText("release ø 測試") / "game-files";
+    const auto root = scratch / pathFromText("release ø 測試") / "dw5e-data";
     const auto games = scratch / "Games";
     fs::create_directories(games);
-    check(newInstallationRoot(games) == games / "DW5E-Recomp/game-files",
+    check(newInstallationRoot(games) == games / "DW5E-Recomp/dw5e-data",
           "custom parent gets a self-contained DW5E-Recomp installation");
-    check(newInstallationRoot(games / "DW5E-Recomp") == games / "DW5E-Recomp/game-files",
+    check(newInstallationRoot(games / "DW5E-Recomp") == games / "DW5E-Recomp/dw5e-data",
           "selecting the branded folder does not create a second branded folder");
     check(newInstallationRoot(games / "DW5E") == games / "DW5E" && newInstallationRoot(root) == root,
           "dedicated folders do not get nested");
@@ -130,12 +130,12 @@ int main()
           "fresh ZIP finds recorded installation");
     check(loadInstallation(candidates[0], restarted, error) && restarted.mode == SaveMode::Normal,
           "discovery retains installation mode");
-    const auto local = newZip / "game-files";
+    const auto local = newZip / "dw5e-data";
     installed(local);
     check(discoverInstallations(newZip, candidates, error) && candidates.size() == 1 &&
               fs::equivalent(candidates[0], local),
           "valid local installation takes priority over machine record");
-    const auto portableOnly = scratch / "portable-only/game-files";
+    const auto portableOnly = scratch / "portable-only/dw5e-data";
     Installation standalone;
     check(loadInstallation(portableOnly, standalone, error), "load independent portable installation");
     standalone.mode = SaveMode::Portable;
@@ -150,7 +150,7 @@ int main()
     put(legacy / "build/dw5e.toml", "legacy settings");
     put(legacy / "build/_deps/keep", "dependency sentinel");
     Installation imported;
-    loadInstallation(scratch / "import/game-files", imported, error);
+    loadInstallation(scratch / "import/dw5e-data", imported, error);
     imported.mode = SaveMode::Portable;
     imported.userData = imported.configDir = imported.root / "user-data";
     check(importInstallation(legacy, imported, SaveConflict::Ask, error),
@@ -211,7 +211,7 @@ int main()
     env("XDG_CONFIG_HOME", {});
     env("XDG_DATA_HOME", {});
     Installation noHome;
-    check(loadInstallation(scratch / "without-home/game-files", noHome, error),
+    check(loadInstallation(scratch / "without-home/dw5e-data", noHome, error),
           "first setup can offer portable mode without a user home");
     configureSaveMode(noHome, SaveMode::Portable);
     check(prepareInstallation(noHome, error) && noHome.userData == noHome.root / "user-data",

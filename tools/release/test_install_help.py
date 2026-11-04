@@ -12,7 +12,7 @@ class InstallationHelpTests(unittest.TestCase):
                 self.assertIn('beside', current.lower())
                 self.assertIn('Choose folder', current)
                 self.assertIn('dw5e-install.json', current)
-                self.assertIn('game-files',current)
+                self.assertIn('dw5e-data',current)
                 self.assertIn('portable',current.lower())
                 self.assertIn('--manage',text)
                 self.assertIn('LOCALAPPDATA' if platform=='Windows' else 'XDG_DATA_HOME',current)

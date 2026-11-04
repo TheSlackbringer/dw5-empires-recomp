@@ -97,7 +97,7 @@ int main(int argc, char **argv)
     const Args args = parseArgs(nativeArguments(argc, argv));
     if (args.help) {
         std::cout << "DW5E setup: [--iso <disc>] [--data-dir <folder>] [--install | --no-window] [--rebuild]\n"
-                     "Installation defaults to game-files beside DW5E.exe / the original AppImage. Saves: this PC or portable.\n"
+                     "Installation defaults to dw5e-data beside DW5E.exe / the original AppImage. Saves: this PC or portable.\n"
                      "Overrides: --data-dir, DW5E_DATA_DIR, remembered choice, launcher folder. Invocation overrides are not saved.\n"
                      "Manage: --manage [--save-mode normal|portable] [--save-conflict source|destination]\n"
                      "Existing files: --use-installation <folder> or --import-installation <folder>. Inspect with --status.\n";
@@ -157,7 +157,7 @@ int main(int argc, char **argv)
         if (destinationError.empty() && !args.importSource.empty()) {
             importSource=existingInstallationRoot(args.importSource);
             if(importSource.empty()) destinationError="Cannot import an unverified DW5E installation: "+pathText(args.importSource);
-            else if(!explicitDestination) data=launcher/"game-files";
+            else if(!explicitDestination) data=launcher/"dw5e-data";
         }
         if (destinationError.empty() && !loadInstallation(data, storage, resolveError)) destinationError=resolveError;
         if (destinationError.empty() && !args.status && !checkInstallDirectory(data, resolveError))

@@ -13,7 +13,7 @@ int main()
         std::cerr << error;
         return 1;
     }
-    const bool ok = root == (launcher / "game-files");
-    std::cout << (ok ? "PASS" : "FAIL") << ": new installation defaults to game-files beneath launcher\n";
+    const bool ok = root == (launcher / "dw5e-data");
+    std::cout << (ok ? "PASS" : "FAIL") << ": new installation defaults to dw5e-data beneath launcher\n";
     return ok ? 0 : 1;
 }

@@ -1,16 +1,16 @@
-// Small native bootstrap: keeps the wizard and its runtime DLLs inside game-files.
+// Small native bootstrap: keeps the wizard and its runtime DLLs inside dw5e-data.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 static int report_error(DWORD code)
 {
-    const char text[] = "DW5E could not start. Keep DW5E.exe beside its complete game-files folder.\r\n";
+    const char text[] = "DW5E could not start. Keep DW5E.exe beside its complete dw5e-data folder.\r\n";
     HANDLE output = GetStdHandle(STD_ERROR_HANDLE);
     DWORD written;
     if (output && output != INVALID_HANDLE_VALUE)
         WriteFile(output, text, sizeof(text) - 1, &written, NULL);
     else
-        MessageBoxW(NULL, L"DW5E could not start. Keep DW5E.exe beside its complete game-files folder.",
+        MessageBoxW(NULL, L"DW5E could not start. Keep DW5E.exe beside its complete dw5e-data folder.",
                     L"Dynasty Warriors 5: Empires", MB_OK | MB_ICONERROR);
     return code ? (int)code : 1;
 }
@@ -32,7 +32,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR unused, int sh
     while (length && path[length - 1] != L'\\')
         --length;
     path[length] = 0;
-    const WCHAR suffix[] = L"game-files\\launcher\\DW5E.exe";
+    const WCHAR suffix[] = L"dw5e-data\\launcher\\DW5E.exe";
     if (length + sizeof(suffix) / sizeof(WCHAR) >= capacity)
         return report_error(ERROR_INSUFFICIENT_BUFFER);
     lstrcatW(path, suffix);
