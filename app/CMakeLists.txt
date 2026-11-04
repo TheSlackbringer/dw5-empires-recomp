@@ -100,10 +100,17 @@ if(DW5E_BUILD_SETUP)
     if(WIN32)
         target_link_libraries(dw5e_uninstall PRIVATE shell32 user32)
         set_target_properties(dw5e_uninstall PROPERTIES WIN32_EXECUTABLE TRUE)
-    endif()
-    if(NOT MSVC)
-        # The staged helper runs outside the package after its launcher exits.
-        target_link_options(dw5e_uninstall PRIVATE -static)
+        if(NOT MSVC)
+            target_link_options(dw5e_uninstall PRIVATE -static)
+        endif()
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # This standalone helper has no C++ ABI boundary with the wizard.
+        # Keep glibc dynamic to avoid conflicting libc.a and libpthread.a in Sniper.
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            target_compile_options(dw5e_uninstall PRIVATE -stdlib=libstdc++)
+            target_link_options(dw5e_uninstall PRIVATE -stdlib=libstdc++)
+        endif()
+        target_link_options(dw5e_uninstall PRIVATE -static-libstdc++ -static-libgcc)
     endif()
     add_dependencies(dw5e_setup dw5e_uninstall)
 
