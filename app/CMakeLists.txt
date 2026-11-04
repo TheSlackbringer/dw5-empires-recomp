@@ -108,9 +108,14 @@ if(DW5E_BUILD_SETUP)
         # Keep glibc dynamic to avoid conflicting libc.a and libpthread.a in Sniper.
         if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
             target_compile_options(dw5e_uninstall PRIVATE -stdlib=libstdc++)
-            target_link_options(dw5e_uninstall PRIVATE -stdlib=libstdc++)
+            # The offline toolchain appends -lc++abi. Resolve the C++ ABI from
+            # the static archive first so the helper never loads that shared library.
+            target_link_options(dw5e_uninstall PRIVATE -stdlib=libstdc++ -nostdlib++ "LINKER:--as-needed")
+            target_link_libraries(dw5e_uninstall PRIVATE "-l:libstdc++.a")
+        else()
+            target_link_options(dw5e_uninstall PRIVATE -static-libstdc++)
         endif()
-        target_link_options(dw5e_uninstall PRIVATE -static-libstdc++ -static-libgcc)
+        target_link_options(dw5e_uninstall PRIVATE -static-libgcc)
     endif()
     add_dependencies(dw5e_setup dw5e_uninstall)
 

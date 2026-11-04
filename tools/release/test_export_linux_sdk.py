@@ -95,6 +95,11 @@ class LinuxSdkTest(unittest.TestCase):
                          "lib64/ld-linux-x86-64.so.2"):
                 self.assertEqual((output / "sysroot" / name).read_text(), files[name])
 
+    def test_export_keeps_static_cxx_runtime_for_standalone_uninstaller(self):
+        archive = "usr/lib/gcc/x86_64-linux-gnu/10/libstdc++.a"
+        with exported_sdk({archive: "synthetic static C++ runtime"}) as (output, files):
+            self.assertEqual((output / "sysroot" / archive).read_text(), files[archive])
+
     def test_export_keeps_architecture_specific_dependency_headers(self):
         headers = {
             "usr/lib/x86_64-linux-gnu/dbus-1.0/include/dbus/dbus-arch-deps.h": "dbus target ABI",

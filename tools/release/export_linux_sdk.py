@@ -235,7 +235,8 @@ def export_sdk(output, cxx=None, patchelf=None):
     for version in Path('/usr/lib/gcc/x86_64-linux-gnu').glob('*'):
         if version.is_dir():
             for source in version.iterdir():
-                if source.is_file() and source.name.startswith(('crt', 'libgcc', 'libgcov')):
+                if source.is_file() and (source.name == 'libstdc++.a' or
+                                         source.name.startswith(('crt', 'libgcc', 'libgcov'))):
                     copy_file(source, sysroot / 'usr/lib/gcc/x86_64-linux-gnu' /
                               version.name / source.name)
     copy_file(Path('/lib64/ld-linux-x86-64.so.2'), sysroot / 'lib64/ld-linux-x86-64.so.2')

@@ -102,6 +102,17 @@ def package_environment(root, windows):
     return env
 
 
+def smoke_staged_uninstaller(helper, scratch):
+    staged = scratch / helper.name
+    shutil.copy2(helper, staged)
+    env = os.environ.copy()
+    env.pop("LD_LIBRARY_PATH", None)
+    result = subprocess.run([staged], cwd=scratch, env=env, timeout=10)
+    if result.returncode != 2:
+        raise SystemExit(f"staged uninstall helper did not start correctly: exit {result.returncode}")
+    print("PASS: staged uninstall helper runs without packaged libraries", flush=True)
+
+
 def smoke_package(root, windows):
     if windows != (os.name == "nt"):
         raise SystemExit("native tool smoke checks must run on the target operating system")
@@ -126,13 +137,7 @@ def smoke_package(root, windows):
     with tempfile.TemporaryDirectory(prefix="dw5e-package-smoke-") as directory:
         scratch = Path(directory)
         helper = root / ("launcher/dw5e-uninstall.exe" if windows else "usr/bin/dw5e-uninstall")
-        staged_helper = scratch / helper.name
-        shutil.copy2(helper, staged_helper)
-        helper_env = os.environ.copy()
-        helper_env.pop("LD_LIBRARY_PATH", None)
-        result = subprocess.run([staged_helper], cwd=scratch, env=helper_env, timeout=10)
-        if result.returncode != 2:
-            raise SystemExit(f"staged uninstall helper did not start correctly: exit {result.returncode}")
+        smoke_staged_uninstaller(helper, scratch)
         source, build = scratch / "source", scratch / "build"
         source.mkdir()
         (source / "CMakeLists.txt").write_text(
@@ -194,6 +199,8 @@ def build_linux_sdk(root, build=None):
              "dw5e_keyboard_test"]
     run([cmake, "--build", build, "--target", "dw5e_setup", "dw5e_host_portability",
          "rexglue", "dw5e_vulkan_startup_test", *tests, "--parallel", str(os.cpu_count() or 1)])
+    with tempfile.TemporaryDirectory(prefix="dw5e-offline-uninstall-") as directory:
+        smoke_staged_uninstaller(build / "dw5e-uninstall", Path(directory))
     # Prefer the newly built runtime over the prebuilt AppImage runtime.
     run_env = env.copy()
     run_env["LD_LIBRARY_PATH"] = ":".join(map(str, [
