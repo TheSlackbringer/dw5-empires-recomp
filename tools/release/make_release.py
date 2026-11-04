@@ -47,9 +47,10 @@ Play
   4. Every later start of DW5E.exe starts the game at once (<1 second).
 
 Your files
-  Installation files stay in game-files beside DW5E.exe by default. This folder holds
-  extracted game files, the compiled game, generated code, cache, logs, tools and sources.
-  Use Choose folder to select a parent for DW5E-Recomp and its own DW5E.exe.
+  The first-install wizard suggests C:\\Games\\DW5E-Recomp. Use Choose folder
+  to select a different parent for DW5E-Recomp and its own DW5E.exe.
+  The game-files folder holds extracted game files, the compiled game, generated
+  code, cache, logs, tools and sources.
   Start the installed copy from that folder.
   On this PC remembers the folder in the DW5E user configuration directory.
   Older dw5e-install.json files are read for compatibility.

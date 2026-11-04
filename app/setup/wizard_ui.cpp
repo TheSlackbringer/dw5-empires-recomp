@@ -290,9 +290,13 @@ bool runWizardWindow(WizardConfig &config)
         createFolder = false;
         folderHasInstallation = false;
         choosingInstallDestination = installDestination;
-        const auto path = page == Page::Disc && !installDestination
+        auto path = page == Page::Disc && !installDestination
             ? std::string{} : pathText(installDestination ? visibleInstallFolder(destination.destination)
                                                            : destination.destination);
+#ifdef _WIN32
+        if (installDestination && !destination.explicitOverride)
+            path = R"(C:\Games\DW5E-Recomp)";
+#endif
         std::snprintf(folderInput, sizeof(folderInput), "%s", path.c_str());
         returnFromOptions = page;
         page = Page::Other;
