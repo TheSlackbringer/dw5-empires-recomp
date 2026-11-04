@@ -511,6 +511,60 @@ class LauncherInstallTests(unittest.TestCase):
         self.assertFalse(sidecar.exists())
         self.assertEqual(P(json.loads(self.launch('--status').stdout)['installation']), selected)
 
+    def test_full_uninstall_helper_removes_installed_launcher(self):
+        installed = self.root / 'DW5E-Recomp'
+        data = installed / 'dw5e-data'
+        self.installed(data)
+        put(data / 'install.json', json.dumps({'version': 1, 'save_mode': 'portable'}))
+        put(data / 'user-data/save/progress', 'portable progress')
+        put(installed / 'README.txt', 'fixture documentation')
+        if os.name == 'nt':
+            put(data / 'BUILD_ID', 'fixture package')
+            (data / 'launcher').mkdir()
+            shutil.copy2(CONFIG.launcher, data / 'launcher/DW5E.exe')
+            put(data / 'tools/packaged', 'installed tool')
+            put(data / 'tools/unrelated', 'user file')
+            put(data / 'package-files.txt', 'BUILD_ID\nlauncher/DW5E.exe\ntools/packaged\n')
+            installed_launcher = installed / 'DW5E.exe'
+            shutil.copy2(CONFIG.bootstrap, installed_launcher)
+        else:
+            installed_launcher = installed / 'DW5E.AppImage'
+            put(installed_launcher, 'fixture installed AppImage')
+        work = self.root / 'uninstall worker'
+        work.mkdir()
+        helper = work / CONFIG.uninstaller.name
+        shutil.copy2(CONFIG.uninstaller, helper)
+        log = work / 'uninstall.log'
+        hold = [sys.executable, '-c', 'import sys; sys.stdin.read()']
+        with subprocess.Popen(hold, stdin=subprocess.PIPE) as wizard, \
+                subprocess.Popen(hold, stdin=subprocess.PIPE) as outer:
+            with subprocess.Popen(
+                [str(helper), str(data), 'keep', str(wizard.pid), str(outer.pid),
+                 sys.executable, str(log)], cwd=work, env=self.env,
+            ) as worker:
+                try:
+                    wizard.stdin.close()
+                    self.assertEqual(wizard.wait(timeout=10), 0)
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        worker.wait(timeout=0.25)
+                    self.assertTrue(installed_launcher.is_file())
+                finally:
+                    outer.stdin.close()
+                try:
+                    result = worker.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    worker.kill()
+                    raise
+        self.assertEqual(result, 0, log.read_text() if log.exists() else 'uninstall worker exit status')
+        self.assertFalse(installed_launcher.exists())
+        expected = {'dw5e-data/user-data/save/progress', 'dw5e-data/save/sentinel',
+                    'dw5e-data/settings.toml'}
+        if os.name == 'nt':
+            expected.add('dw5e-data/tools/unrelated')
+        self.assertEqual({p.relative_to(installed).as_posix() for p in installed.rglob('*') if p.is_file()},
+                         expected)
+        self.assertEqual((data / 'user-data/save/progress').read_text(), 'portable progress')
+
     def test_custom_install_launcher_works_after_removing_download(self):
         self.check_custom_install_launcher('dw5e-data')
 
@@ -632,9 +686,11 @@ if __name__ == '__main__':
     parser.add_argument('--out', required=True, type=P)
     parser.add_argument('--runtime-bin', type=P)
     parser.add_argument('--bootstrap', type=P)
+    parser.add_argument('--uninstaller', type=P, required=True)
     CONFIG = parser.parse_args()
     CONFIG.launcher = CONFIG.launcher.resolve()
     CONFIG.game = CONFIG.game.resolve()
     CONFIG.selection_driver = CONFIG.selection_driver.resolve()
+    CONFIG.uninstaller = CONFIG.uninstaller.resolve()
     CONFIG.out.mkdir(parents=True, exist_ok=True)
     unittest.main(argv=[sys.argv[0]], verbosity=2)

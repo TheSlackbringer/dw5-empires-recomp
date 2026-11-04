@@ -167,7 +167,6 @@ int main()
     put(imported.root / "builder/app/keep", "generated builder");
     put(imported.root / "generated/keep", "generated code");
     put(imported.root / "cache/snapshots/keep", "player snapshot");
-    const auto importMetadata = read(imported.root / "install.json");
     const auto machineIndex = read(normalConfigDirectory() / "installations.json");
     {
         InstallationLock held;
@@ -175,37 +174,89 @@ int main()
         bool blocked = false;
         std::thread attempt([&] {
             std::string lockError;
-            blocked = !uninstallGameFiles(imported.root, imported.root.parent_path(), true, lockError);
+            blocked = !uninstallInstallation(imported.root, true, lockError);
         });
         attempt.join();
         check(blocked && fs::exists(imported.root / "game/files/default.xex"),
               "uninstall cannot remove files while another operation holds the lock");
     }
-    check(uninstallGameFiles(imported.root, imported.root.parent_path(), true, error),
+    check(uninstallInstallation(imported.root, true, error),
           "uninstall verified portable game files");
     check(!fs::exists(imported.root / "game/files") &&
               !fs::exists(imported.root / "game/installed.txt") &&
               !fs::exists(imported.root / "build/_deps/keep") &&
               !fs::exists(imported.root / "builder") && !fs::exists(imported.root / "generated"),
           "uninstall removes extracted and built files");
-    check(read(imported.root / "install.json") == importMetadata &&
+    check(!fs::exists(imported.root / "install.json") &&
               read(imported.userData / "0000000000000001/4B4F07D3/save") == "legacy progress" &&
-              read(imported.configDir / "dw5e.toml") == "legacy settings" &&
+              !fs::exists(imported.configDir / "dw5e.toml") &&
               read(imported.root / "launcher/DW5E.exe") == "packaged launcher" &&
               read(imported.root / "tools/keep") == "packaged tools" &&
-              read(imported.root / "cache/snapshots/keep") == "player snapshot" &&
+              !fs::exists(imported.root / "cache") &&
               read(normalConfigDirectory() / "installations.json") == machineIndex,
-          "uninstall preserves portable progress, mode, launcher, tools and snapshots");
-    check(uninstallGameFiles(legacy, newZip, true, error) &&
-              loadInstallation(legacy, restarted, error) && restarted.mode == SaveMode::Legacy &&
-              read(legacy / "build/dw5e.toml") == "legacy settings" &&
+          "uninstall keeps portable progress and leaves files outside the branded payload");
+    check(uninstallInstallation(legacy, true, error) &&
+              !fs::exists(legacy / "build/dw5e.toml") &&
               read(legacy / "0000000000000001/4B4F07D3/save") == "legacy progress" &&
               !fs::exists(legacy / "build/_deps/keep"),
-          "legacy uninstall keeps settings in build and saves in place");
+          "legacy uninstall keeps saves in place and removes settings and build files");
     put(scratch / "unverified/build/keep", "unrelated");
-    check(!uninstallGameFiles(scratch / "unverified", newZip, true, error) &&
+    check(!uninstallInstallation(scratch / "unverified", true, error) &&
               read(scratch / "unverified/build/keep") == "unrelated",
           "uninstall refuses an unverified folder");
+    const auto fullFolder = scratch / "uninstall" / "DW5E-Recomp";
+    const auto fullData = fullFolder / "dw5e-data";
+    installed(fullData);
+    put(fullData / "install.json", R"({"version":1,"save_mode":"portable"})");
+    put(fullData / "user-data/save/progress", "keep this save");
+    put(fullData / "user-data/dw5e.toml", "old settings");
+    put(fullData / "cache/snapshots/snapshot", "old snapshot");
+    put(fullData / "logs/build.log", "old log");
+    put(fullFolder / "README.txt", "old documentation");
+#ifndef _WIN32
+    put(scratch / "outside", "symlink destination");
+    fs::create_directories(fullData / "builder");
+    fs::create_symlink(scratch / "outside", fullData / "builder/linked-tool");
+#endif
+    check(uninstallInstallation(fullData, true, error) &&
+              read(fullData / "user-data/save/progress") == "keep this save" &&
+              !fs::exists(fullData / "install.json") && !fs::exists(fullData / "user-data/dw5e.toml") &&
+              !fs::exists(fullData / "cache") && !fs::exists(fullData / "logs") &&
+              !fs::exists(fullData / "game") && !fs::exists(fullFolder / "README.txt"),
+          "full uninstall leaves only the selected portable saves");
+#ifndef _WIN32
+    check(read(scratch / "outside") == "symlink destination",
+          "uninstall removes internal Linux symlinks without touching their targets");
+#endif
+    check(loadInstallation(fullData, restarted, error) && restarted.mode == SaveMode::Portable,
+          "reinstall recognizes retained portable saves without an installation record");
+    installed(fullData);
+    put(fullData / "install.json", R"({"version":1,"save_mode":"portable"})");
+    check(uninstallInstallation(fullData, false, error) && !fs::exists(fullFolder),
+          "deleting portable saves removes the entire empty branded installation");
+    const auto normalFolder = scratch / "normal-uninstall/DW5E-Recomp";
+    const auto otherFolder = scratch / "other-uninstall/DW5E-Recomp";
+    Installation normalCopy, otherCopy;
+    installed(normalFolder / "dw5e-data");
+    installed(otherFolder / "dw5e-data");
+    check(loadInstallation(normalFolder / "dw5e-data", normalCopy, error) &&
+              loadInstallation(otherFolder / "dw5e-data", otherCopy, error),
+          "load both normal uninstall fixtures");
+    configureSaveMode(normalCopy, SaveMode::Normal);
+    configureSaveMode(otherCopy, SaveMode::Normal);
+    check(prepareInstallation(normalCopy, error) && prepareInstallation(otherCopy, error),
+          "record both normal installations");
+    put(normalCopy.userData / "save/progress", "shared progress");
+    put(normalCopy.configDir / "dw5e.toml", "shared settings");
+    put(normalFolder / "unrelated.txt", "unrelated document");
+    check(!uninstallInstallation(normalCopy.root, false, error) && fs::exists(normalCopy.root / "game/files"),
+          "uninstall refuses to delete shared saves before removing any game files");
+    check(uninstallInstallation(normalCopy.root, true, error) &&
+              read(normalCopy.userData / "save/progress") == "shared progress" &&
+              read(normalCopy.configDir / "dw5e.toml") == "shared settings" &&
+              read(normalFolder / "unrelated.txt") == "unrelated document" &&
+              fs::exists(otherCopy.root / "game/files"),
+          "uninstall preserves shared saves and settings, unrelated files and the other install");
     env("LOCALAPPDATA", {});
     env("HOME", {});
     env("XDG_CONFIG_HOME", {});

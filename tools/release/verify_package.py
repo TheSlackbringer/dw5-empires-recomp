@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 
@@ -50,9 +51,11 @@ def validate_package(root, windows):
             "tools/llvm-mingw/bin/x86_64-w64-mingw32-windres.exe",
             "tools/llvm-mingw/bin/llvm-ar.exe", "tools/llvm-mingw/bin/llvm-ranlib.exe",
         ]
+        if root != outer:
+            required += ["launcher/dw5e-uninstall.exe", "package-files.txt"]
     else:
         required += [
-            "DW5E", "usr/bin/rexglue", "tools/rexglue",
+            "DW5E", "usr/bin/rexglue", "usr/bin/dw5e-uninstall", "tools/rexglue",
             "tools/cmake/bin/cmake", "tools/ninja", "tools/linux/clang.cmake",
             "tools/clang/bin/clang", "tools/clang/bin/clang++",
             "tools/clang/bin/llvm-ar", "tools/clang/bin/llvm-ranlib",
@@ -122,6 +125,14 @@ def smoke_package(root, windows):
     # headers, linker, CRT and runtime dependencies without any retail game files.
     with tempfile.TemporaryDirectory(prefix="dw5e-package-smoke-") as directory:
         scratch = Path(directory)
+        helper = root / ("launcher/dw5e-uninstall.exe" if windows else "usr/bin/dw5e-uninstall")
+        staged_helper = scratch / helper.name
+        shutil.copy2(helper, staged_helper)
+        helper_env = os.environ.copy()
+        helper_env.pop("LD_LIBRARY_PATH", None)
+        result = subprocess.run([staged_helper], cwd=scratch, env=helper_env, timeout=10)
+        if result.returncode != 2:
+            raise SystemExit(f"staged uninstall helper did not start correctly: exit {result.returncode}")
         source, build = scratch / "source", scratch / "build"
         source.mkdir()
         (source / "CMakeLists.txt").write_text(

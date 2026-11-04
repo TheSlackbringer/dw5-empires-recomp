@@ -61,6 +61,7 @@ if(DW5E_BUILD_SETUP)
         setup/build_game.cpp
         setup/setup_pipeline.cpp
         setup/installation.cpp
+        setup/uninstall_process.cpp
         setup/wizard_storage.cpp
         setup/wizard_ui.cpp
         setup/wizard_main.cpp
@@ -92,6 +93,19 @@ if(DW5E_BUILD_SETUP)
     else()
         add_executable(dw5e_setup ${DW5E_SETUP_SOURCES})
     endif()
+
+    add_executable(dw5e_uninstall setup/uninstall_main.cpp setup/installation.cpp
+        setup/install_location.cpp setup/install_state.cpp)
+    set_target_properties(dw5e_uninstall PROPERTIES OUTPUT_NAME "dw5e-uninstall")
+    if(WIN32)
+        target_link_libraries(dw5e_uninstall PRIVATE shell32 user32)
+        set_target_properties(dw5e_uninstall PROPERTIES WIN32_EXECUTABLE TRUE)
+    endif()
+    if(NOT MSVC)
+        # The staged helper runs outside the package after its launcher exits.
+        target_link_options(dw5e_uninstall PRIVATE -static)
+    endif()
+    add_dependencies(dw5e_setup dw5e_uninstall)
 
     set_target_properties(dw5e_setup PROPERTIES OUTPUT_NAME "DW5E")
     if(WIN32 AND DW5E_BUILD_GAME)
@@ -280,6 +294,7 @@ if(Python3_Interpreter_FOUND AND TARGET dw5e_setup AND CMAKE_HOST_SYSTEM_NAME ST
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/launcher_install_test.py
         --launcher $<TARGET_FILE:dw5e_setup> --game $<TARGET_FILE:dw5e_install_fake_game>
         --selection-driver $<TARGET_FILE:dw5e_launcher_selection_driver>
+        --uninstaller $<TARGET_FILE:dw5e_uninstall>
         ${bootstrap_test_args}
         --out ${CMAKE_CURRENT_BINARY_DIR}/install-launcher-test)
 endif()

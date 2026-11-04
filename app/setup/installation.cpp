@@ -144,6 +144,21 @@ bool verified(const fs::path &root)
 {
     return installState(root) == InstallState::Installed && hasRetailMarker(root);
 }
+bool saveDirectoryName(const fs::path &path)
+{
+    const auto name = pathText(path.filename());
+    return name == "achievements" || name == "save" || name == "saves" ||
+           (name.size() == 16 && name.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos);
+}
+bool findSaveDirectories(const fs::path &root, std::vector<fs::path> &paths, std::string &error)
+{
+    std::error_code ec;
+    for (fs::directory_iterator it(root, ec), end; it != end && !ec; it.increment(ec))
+        if (saveDirectoryName(it->path()))
+            paths.push_back(it->path());
+    return !ec || ec == std::errc::no_such_file_or_directory ||
+           fail(root, "Cannot enumerate saves: " + ec.message(), error);
+}
 struct Copy
 {
     fs::path source, destination;
@@ -186,10 +201,7 @@ bool collectUserFiles(const Installation &source, const Installation &destinatio
         std::error_code ec;
         for (fs::directory_iterator it(source.root, ec), end; it != end && !ec; it.increment(ec))
         {
-            const auto name = pathText(it->path().filename());
-            const bool profile =
-                name.size() == 16 && name.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos;
-            if (profile || name == "achievements" || name == "save" || name == "saves")
+            if (saveDirectoryName(it->path()))
                 if (!collect(it->path(), destination.userData / it->path().filename(), files, error))
                     return false;
         }
@@ -404,6 +416,19 @@ bool loadInstallation(const fs::path &root, Installation &installation, std::str
         return fail(metadata, "Cannot inspect installation metadata", error);
     else if (installState(root) == InstallState::Installed)
         installation.mode = SaveMode::Legacy;
+    else {
+        std::vector<fs::path> retained;
+        if (!findSaveDirectories(root / "user-data", retained, error))
+            return false;
+        if (!retained.empty())
+            installation.mode = SaveMode::Portable;
+        else {
+            if (!findSaveDirectories(root, retained, error))
+                return false;
+            if (!retained.empty())
+                installation.mode = SaveMode::Legacy;
+        }
+    }
     setPaths(installation);
     if (installation.recorded && (installation.userData.empty() || installation.configDir.empty()))
         return fail(root, "Cannot determine standard user directories", error);
@@ -680,104 +705,273 @@ bool canUninstallGameFiles(const fs::path &root)
     return root.is_absolute() && root != root.root_path() && hasRetailMarker(root);
 }
 
-bool uninstallGameFiles(const fs::path &selected, const fs::path &launcher, bool rememberForReinstall,
-                        std::string &error)
+fs::path uninstallFolder(const fs::path &root)
 {
+    const auto parent = root.parent_path();
+    return (root.filename() == "dw5e-data" || root.filename() == "game-files") &&
+           parent.filename() == "DW5E-Recomp" ? parent : root;
+}
+
+namespace {
+bool uninstallIndex(const Installation &installation, Json &index, bool &shared, std::string &error)
+{
+    const auto config = normalConfigDirectory();
+    const auto file = config / "installations.json";
+    std::error_code ec;
+    shared = false;
+    if (config.empty() || !fs::exists(file, ec))
+        return !ec || fail(file, "Cannot inspect the installation index: " + ec.message(), error);
+    if (!readJson(file, index, error))
+        return false;
+    const auto paths = index.find("installations");
+    if (paths == index.end() || !paths->is_array())
+        return fail(file, "Invalid installation location list", error);
+    for (const auto &entry : *paths) {
+        if (!entry.is_string())
+            return fail(file, "Invalid installation location", error);
+        const auto other = pathFromText(entry.get<std::string>());
+        if (!other.is_absolute())
+            return fail(file, "Installation locations must be absolute paths", error);
+        if (samePath(other, installation.root) || !verified(other))
+            continue;
+        Installation otherInstallation;
+        if (!loadInstallation(other, otherInstallation, error))
+            return false;
+        shared |= otherInstallation.mode == SaveMode::Normal;
+    }
+    return true;
+}
+
+bool removablePath(const fs::path &path, std::string &error)
+{
+    std::error_code ec;
+    const auto status = fs::symlink_status(path, ec);
+    if (ec == std::errc::no_such_file_or_directory)
+        return true;
+    if (ec || fs::is_symlink(status))
+        return fail(path, "Cannot remove a redirected or inaccessible path", error);
+#ifdef _WIN32
+    const auto attributes = GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+        return fail(path, "Cannot remove a redirected or inaccessible path", error);
+    if (fs::is_directory(status)) {
+        for (fs::recursive_directory_iterator it(path, ec), end; it != end && !ec; it.increment(ec)) {
+            const auto child = GetFileAttributesW(it->path().c_str());
+            if (child == INVALID_FILE_ATTRIBUTES || (child & FILE_ATTRIBUTE_REPARSE_POINT))
+                return fail(it->path(), "Cannot remove a redirected or inaccessible path", error);
+        }
+    }
+#endif
+    return !ec || fail(path, "Cannot inspect files for removal: " + ec.message(), error);
+}
+
+bool safeRemovalParent(const fs::path &path, std::string &error)
+{
+    if (path.empty())
+        return true;
+    std::error_code ec;
+    const auto status = fs::symlink_status(path, ec);
+    if (ec == std::errc::no_such_file_or_directory)
+        return true;
+    if (ec || fs::is_symlink(status) || !fs::is_directory(status))
+        return fail(path, "Cannot remove files through a redirected or inaccessible path", error);
+#ifdef _WIN32
+    if (GetFileAttributesW(path.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT)
+        return fail(path, "Cannot remove files through a redirected or inaccessible path", error);
+#endif
+    return true;
+}
+
+#ifdef _WIN32
+bool collectPackageFiles(const fs::path &payload, std::vector<fs::path> &files,
+                         std::vector<fs::path> &launchers, std::set<fs::path, std::greater<>> &parents,
+                         std::string &error)
+{
+    const auto manifest = payload / "package-files.txt";
+    std::error_code ec;
+    if (!fs::exists(manifest, ec)) {
+        // Earlier archives have no file inventory. Remove only the identifiable
+        // launcher and release metadata from those packages.
+        launchers.push_back(payload / "launcher/DW5E.exe");
+        files.push_back(payload / "BUILD_ID");
+        parents.insert(payload / "launcher");
+        parents.insert(payload);
+        return !ec || fail(manifest, "Cannot inspect the package inventory", error);
+    }
+    if (!removablePath(manifest, error) || fs::file_size(manifest, ec) > 16 * 1024 * 1024 || ec)
+        return fail(manifest, "Invalid package inventory", error);
+    std::ifstream in(manifest, std::ios::binary);
+    if (!in)
+        return fail(manifest, "Cannot read the package inventory", error);
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        const auto relative = pathFromText(line);
+        if (line.empty() || line.find_first_of(":\\") != std::string::npos ||
+            line.find('\0') != std::string::npos || relative.has_root_path() ||
+            std::any_of(relative.begin(), relative.end(), [](const fs::path &part) {
+                return part.empty() || part == "." || part == "..";
+            }))
+            return fail(manifest, "Invalid path in the package inventory", error);
+        const auto first = *relative.begin();
+        const std::string component = pathText(first);
+        static const std::set<std::string> packaged{"app", "patches", "tools", "rexglue-sdk", "LICENSES",
+                                                    "launcher", "BUILD_ID", "dw5e_manifest.toml", "LICENSE",
+                                                    "README.md"};
+        if (!packaged.contains(component))
+            return fail(manifest, "The package inventory includes an unmanaged path", error);
+        const auto file = payload / relative;
+        for (auto parent = file.parent_path(); parent != payload; parent = parent.parent_path()) {
+            const bool added = parents.insert(parent).second;
+            if (added && !safeRemovalParent(parent, error))
+                return false;
+        }
+        const auto status = fs::symlink_status(file, ec);
+        if (ec != std::errc::no_such_file_or_directory && (ec || !fs::is_regular_file(status)))
+            return fail(file, "A packaged file was replaced by another kind of file", error);
+        (first == "launcher" || relative == "BUILD_ID" ? launchers : files).push_back(file);
+    }
+    if (!in.eof())
+        return fail(manifest, "Cannot read the package inventory", error);
+    parents.insert(payload);
+    launchers.push_back(manifest);
+    return true;
+}
+#endif
+} // namespace
+
+bool uninstallSavesShared(const Installation &installation, bool &shared, std::string &error)
+{
+    shared = false;
+    Json index;
+    return installation.mode != SaveMode::Normal || uninstallIndex(installation, index, shared, error);
+}
+
+bool uninstallInstallation(const fs::path &selected, bool keepSaves, std::string &error)
+{
+    error.clear();
     if (!canUninstallGameFiles(selected))
         return fail(selected, "Cannot identify this folder as a DW5E installation", error);
     const auto root = resolvedPath(selected);
-    if (root == root.root_path())
-        return fail(root, "Cannot uninstall from the filesystem root", error);
+    auto requested = selected.lexically_normal().make_preferred();
+#ifdef _WIN32
+    const bool redirected = _wcsicmp(requested.c_str(), root.c_str()) != 0;
+#else
+    const bool redirected = requested != root;
+#endif
+    if (redirected)
+        return fail(selected, "Cannot uninstall through a redirected path", error);
     InstallationLock lock;
     if (!lock.acquire(root, error) || installationGameRunning(root, error))
         return false;
     if (!hasRetailMarker(root))
         return fail(root, "The installation changed before removal", error);
 
-    const auto directoryIsSafe = [&](const fs::path &directory) {
-        std::error_code ec;
-        const auto status = fs::symlink_status(directory, ec);
-        if (ec == std::errc::no_such_file_or_directory)
-            return true;
-        if (ec || fs::is_symlink(status) || !fs::is_directory(status) ||
-            !samePath(directory.parent_path(), resolvedPath(directory).parent_path()))
-            return fail(directory, "Cannot safely remove this directory", error);
-#ifdef _WIN32
-        const DWORD attributes = GetFileAttributesW(directory.c_str());
-        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
-            return fail(directory, "Cannot remove a redirected directory", error);
-#endif
-        return true;
-    };
-    const auto executableDir = executableDirectory(error);
-    if (executableDir.empty())
-        return false;
-    const auto appDirectory = resolvedPath(executableDir);
-    const std::vector<fs::path> targets{root / "build", root / "generated", root / "builder",
-                                        root / "game/files"};
-    if (!directoryIsSafe(root / "game"))
-        return false;
-    for (const auto &target : targets) {
-        if (!directoryIsSafe(target))
-            return false;
-        const auto relative = appDirectory.lexically_relative(resolvedPath(target));
-        if (!relative.empty() && *relative.begin() != "..")
-            return fail(target, "Cannot remove files containing the running launcher", error);
-    }
-
     Installation installation;
     if (!loadInstallation(root, installation, error))
         return false;
-    if (rememberForReinstall) {
-        if (installation.mode == SaveMode::Normal && !rememberNormalInstallation(installation, error, true))
+    const auto folder = uninstallFolder(root);
+    const auto config = normalConfigDirectory();
+    const auto indexPath = config / "installations.json";
+    for (const auto &parent : {root / "game", root / "user-data", config, installation.userData})
+        if (!safeRemovalParent(parent, error))
             return false;
-        if (installation.mode == SaveMode::Legacy && !rememberInstallLocation(launcher, root, error))
+    InstallationLock indexLock;
+    std::error_code ec;
+    if (!config.empty() && fs::is_directory(config, ec) && !indexLock.acquire(config, error))
+        return false;
+    Json index;
+    bool shared = false;
+    if (!uninstallIndex(installation, index, shared, error))
+        return false;
+    if (!keepSaves && installation.mode == SaveMode::Normal && shared)
+        return fail(installation.userData, "Another DW5E installation shares these saves", error);
+
+    std::vector<fs::path> targets{root / "build", root / "generated", root / "builder",
+                                  root / "cache", root / "logs", root / "game/files",
+                                  root / "user-data/dw5e.toml"};
+    std::vector<fs::path> launchers;
+    std::set<fs::path, std::greater<>> packageParents;
+    // Restrict packaged-file removal to the self-contained layout and its known payload.
+    if (folder != root) {
+        const auto alternate = folder / (root.filename() == "dw5e-data" ? "game-files" : "dw5e-data");
+        if (!safeRemovalParent(alternate, error))
             return false;
+        if (verified(alternate))
+            return fail(folder, "Two installations share this launcher folder", error);
+        targets.push_back(folder / "README.txt");
+#ifdef _WIN32
+        for (const auto &payload : {root, alternate}) {
+            if (fs::is_regular_file(payload / "BUILD_ID", ec) &&
+                fs::is_regular_file(payload / "launcher/DW5E.exe", ec) &&
+                !collectPackageFiles(payload, targets, launchers, packageParents, error))
+                return false;
+        }
+        if (!packageParents.empty())
+            launchers.push_back(folder / "DW5E.exe");
+#else
+        launchers.push_back(folder / "DW5E.AppImage");
+#endif
     }
-    // Persist legacy mode before removing the marker that originally implied it.
-    if (!installation.recorded && !saveInstallation(installation, error))
+    if (installation.mode == SaveMode::Normal && !shared)
+        targets.push_back(installation.configDir / "dw5e.toml");
+    if (!keepSaves &&
+        (!findSaveDirectories(root, targets, error) ||
+         !findSaveDirectories(root / "user-data", targets, error) ||
+         (installation.mode == SaveMode::Normal &&
+          !findSaveDirectories(installation.userData, targets, error))))
         return false;
 
-    const auto removeTree = [&](const fs::path &path) {
-        std::error_code ec;
-#ifdef _WIN32
-        const auto isReparsePoint = [](const fs::path &entry) {
-            const DWORD attributes = GetFileAttributesW(entry.c_str());
-            return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT);
-        };
-        if (isReparsePoint(path))
-            return fail(path, "Cannot remove a redirected path", error);
-        if (fs::is_directory(path, ec)) {
-            for (fs::recursive_directory_iterator it(path, ec), end; it != end && !ec; it.increment(ec))
-                if (isReparsePoint(it->path()))
-                    return fail(it->path(), "Cannot remove a redirected path", error);
-            if (ec)
-                return fail(path, "Cannot inspect files for removal: " + ec.message(), error);
-        }
-        ec.clear();
-#endif
-        fs::remove_all(path, ec); // Does not follow symbolic links.
-        return !ec || fail(path, "Cannot remove game files: " + ec.message(), error);
-    };
-    for (const auto &target : targets) {
-        if (target == root / "build") {
-            std::error_code ec;
-            std::vector<fs::path> entries;
-            for (fs::directory_iterator it(target, ec), end; it != end && !ec; it.increment(ec))
-                if (it->path().filename() != "dw5e.toml")
-                    entries.push_back(it->path());
-            if (ec && ec != std::errc::no_such_file_or_directory)
-                return fail(target, "Cannot inspect the old build", error);
-            for (const auto &entry : entries)
-                if (!removeTree(entry))
-                    return false;
-        } else if (!removeTree(target)) {
+    for (const auto &target : targets)
+        if (!removablePath(target, error))
             return false;
-        }
+    for (const auto &target : launchers)
+        if (!removablePath(target, error))
+            return false;
+    if (!removablePath(root / "game/installed.txt", error) || !removablePath(root / "install.json", error))
+        return false;
+    for (const auto &target : targets) {
+        fs::remove_all(target, ec);
+        if (ec)
+            return fail(target, "Cannot remove DW5E files: " + ec.message(), error);
     }
-    std::error_code ec;
-    const auto marker = root / "game/installed.txt";
-    fs::remove(marker, ec);
-    return !ec || fail(marker, "Cannot remove the installation marker", error);
+    if (!index.is_null()) {
+        auto &paths = index["installations"];
+        std::erase_if(paths.get_ref<Json::array_t &>(), [&](const Json &entry) {
+            return samePath(pathFromText(entry.get<std::string>()), root);
+        });
+        const auto preferred = index.find("preferred");
+        if (preferred != index.end() && preferred->is_string() &&
+            samePath(pathFromText(preferred->get<std::string>()), root))
+            index.erase(preferred);
+        if (paths.empty())
+            fs::remove(indexPath, ec);
+        else if (!writeAtomicText(indexPath, index.dump(2) + "\n", error))
+            return false;
+        if (ec)
+            return fail(indexPath, "Cannot remove the installation record: " + ec.message(), error);
+    }
+    for (const auto &target : launchers) {
+        fs::remove_all(target, ec);
+        if (ec)
+            return fail(target, "Cannot remove the installed launcher: " + ec.message(), error);
+    }
+    for (const auto &metadata : {root / "install.json", root / "game/installed.txt"}) {
+        fs::remove(metadata, ec);
+        if (ec)
+            return fail(metadata, "Cannot remove installation metadata: " + ec.message(), error);
+    }
+    packageParents.insert({root / "game", root / "user-data", root, folder});
+    if (installation.mode == SaveMode::Normal && !shared) {
+        packageParents.insert(installation.configDir);
+        if (!keepSaves)
+            packageParents.insert(installation.userData);
+    }
+    for (const auto &directory : packageParents) {
+        fs::remove(directory, ec);
+        if (ec && ec != std::errc::directory_not_empty)
+            return fail(directory, "Cannot remove the empty folder: " + ec.message(), error);
+    }
+    return true;
 }
 } // namespace dw5e::setup

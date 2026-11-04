@@ -53,6 +53,7 @@ bool importInstallation(const std::filesystem::path &source, Installation &desti
                         std::string &error);
 bool installationGameRunning(const std::filesystem::path &root, std::string &error);
 bool canUninstallGameFiles(const std::filesystem::path &root);
-bool uninstallGameFiles(const std::filesystem::path &root, const std::filesystem::path &launcher,
-                        bool rememberForReinstall, std::string &error);
+std::filesystem::path uninstallFolder(const std::filesystem::path &root);
+bool uninstallSavesShared(const Installation &installation, bool &shared, std::string &error);
+bool uninstallInstallation(const std::filesystem::path &root, bool keepSaves, std::string &error);
 } // namespace dw5e::setup

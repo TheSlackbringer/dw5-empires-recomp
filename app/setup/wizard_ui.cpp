@@ -1,6 +1,7 @@
 #include "wizard_ui.h"
 #include "install_state.h"
 #include "install_location.h"
+#include "uninstall_process.h"
 #include "xdvdfs.h"
 
 #include <chrono>
@@ -38,14 +39,15 @@ struct Preparation {
     InstallFolderSelection selection;
     std::atomic<bool> done{false};
     bool ok=false;
+    fs::path uninstallLog;
     std::thread worker;
-    Preparation(const WizardConfig &source, const InstallFolderSelection &folder, bool uninstall)
+    Preparation(const WizardConfig &source, const InstallFolderSelection &folder, bool uninstall, bool keepSaves)
         : config(source), selection(folder) {
-        worker=std::thread([this, uninstall] {
+        worker=std::thread([this, uninstall, keepSaves] {
             try {
                 ok = uninstall
-                    ? uninstallGameFiles(selection.destination, selection.launcher,
-                                         !selection.explicitOverride, selection.error)
+                    ? scheduleUninstall(config.base.root, selection.destination, keepSaves,
+                                        uninstallLog, selection.error)
                     : prepareWizardSelection(config, selection);
             }
             catch(const std::exception &error) { selection.error=error.what(); }
@@ -329,8 +331,10 @@ bool runWizardWindow(WizardConfig &config)
     std::unique_ptr<SetupRun> activeRun;
     std::unique_ptr<Preparation> preparation;
     bool closeAfterPreparation=false;
+    bool keepUninstallSaves = true;
+    fs::path uninstallLog;
     const auto beginPreparation = [&](bool uninstall = false) {
-        preparation = std::make_unique<Preparation>(config, destination, uninstall);
+        preparation = std::make_unique<Preparation>(config, destination, uninstall, keepUninstallSaves);
         destination.frozen = true;
     };
     bool quit = false;
@@ -385,6 +389,7 @@ bool runWizardWindow(WizardConfig &config)
             const bool ok = preparation->ok;
             config = std::move(preparation->config);
             destination = std::move(preparation->selection);
+            uninstallLog = std::move(preparation->uninstallLog);
             preparation.reset();
             if (ok && page == Page::Uninstall) {
                 config.manageOnly = true;
@@ -502,21 +507,6 @@ bool runWizardWindow(WizardConfig &config)
                 }
                 return result;
             };
-            const auto link = [](const char *label) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.58f, 0.80f, 1.0f, 1.0f));
-                const bool pressed = ImGui::Button(label);
-                const ImVec2 first = ImGui::GetItemRectMin();
-                const ImVec2 last = ImGui::GetItemRectMax();
-                const ImVec2 padding = ImGui::GetStyle().FramePadding;
-                const float underline = last.y - padding.y;
-                ImGui::GetWindowDrawList()->AddLine(ImVec2(first.x + padding.x, underline),
-                                                   ImVec2(last.x - padding.x, underline),
-                                                   ImGui::GetColorU32(ImGuiCol_Text));
-                ImGui::PopStyleColor(2);
-                return pressed;
-            };
-
             const auto showError = [](const std::string &error) {
                 if (error.empty())
                     return;
@@ -594,21 +584,39 @@ bool runWizardWindow(WizardConfig &config)
                     page = pageBeforeFailure;
             }
             else if (!activeRun && page == Page::Uninstall) {
-                ImGui::TextUnformatted("Uninstall game files?");
-                ImGui::TextWrapped("%s", pathText(destination.destination).c_str());
-                ImGui::TextWrapped("This removes the extracted game files, generated code and compiled build.");
-                ImGui::TextWrapped("The launcher, your saves and settings will stay. You will need the ISO to reinstall this copy.");
-                const auto actions = footer("Back", preparing ? "Removing..." : "Uninstall game files",
-                                            destination.error.empty(), true);
+                ImGui::TextUnformatted("Uninstall DW5E?");
+                ImGui::TextWrapped("Installation folder: %s", pathText(uninstallFolder(destination.destination)).c_str());
+                ImGui::TextWrapped("This removes the installed launcher, game files and settings.");
+                Installation installed;
+                bool shared = false;
+                std::string error;
+                const bool ready = loadInstallation(destination.destination, installed, error) &&
+                    uninstallSavesShared(installed, shared, error);
+                if (shared)
+                    keepUninstallSaves = true;
+                ImGui::BeginDisabled(shared || !ready);
+                ImGui::Checkbox("Keep my saves", &keepUninstallSaves);
+                ImGui::EndDisabled();
+                if (shared)
+                    ImGui::TextWrapped("Another DW5E installation uses these saves.");
+                if (keepUninstallSaves)
+                    ImGui::TextWrapped("Saves will remain in: %s", pathText(installed.userData).c_str());
+                else
+                    showError("Your saves will be permanently deleted.");
+                showError(error);
+                const auto actions = footer("Back", preparing ? "Preparing..." :
+                    keepUninstallSaves ? "Uninstall" : "Uninstall and delete saves",
+                    ready && destination.error.empty(), true);
                 if (actions.back)
                     page = Page::Manage;
                 if (actions.primary)
                     beginPreparation(true);
             }
             else if (!activeRun && page == Page::Uninstalled) {
-                ImGui::TextUnformatted("Game files removed");
-                ImGui::TextWrapped("Your saves and settings are still in place. Open the launcher again to reinstall from an ISO.");
-                if (footer(nullptr, "Done").primary)
+                ImGui::TextUnformatted("Ready to uninstall");
+                ImGui::TextWrapped("Removal will finish after this window closes.");
+                ImGui::TextWrapped("If removal fails, details will be saved to %s.", pathText(uninstallLog).c_str());
+                if (footer(nullptr, "Close").primary)
                     quit = true;
             }
             else if (!activeRun && (page == Page::Copied || page == Page::Saved)) {
@@ -665,8 +673,10 @@ bool runWizardWindow(WizardConfig &config)
                     openOptions();
                 if (canUninstallGameFiles(destination.destination)) {
                     ImGui::Separator();
-                    if (link("Uninstall game files..."))
+                    if (ImGui::Button("Uninstall DW5E...", ImVec2(0, buttonHeight))) {
+                        keepUninstallSaves = true;
                         page = Page::Uninstall;
+                    }
                 }
                 const auto actions = footer(returnToExisting ? "Back" : nullptr,
                                             preparing ? "Saving..." : "Save change",

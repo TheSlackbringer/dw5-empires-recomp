@@ -201,6 +201,9 @@ bool installReleaseLauncher(fs::path &root, const fs::path &data, std::string &e
     for (const auto *item : {"dw5e_manifest.toml", "LICENSE", "README.md", "BUILD_ID"})
         if (!copy(root / item, payload / item))
             return false;
+    if (fs::is_regular_file(root / "package-files.txt", ec) &&
+        !copy(root / "package-files.txt", payload / "package-files.txt"))
+        return false;
     if (!copy(root.parent_path() / "README.txt", folder / "README.txt") ||
         !copy(root.parent_path() / "DW5E.exe", folder / "DW5E.exe"))
         return false;

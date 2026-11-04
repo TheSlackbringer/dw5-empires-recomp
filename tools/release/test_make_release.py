@@ -24,6 +24,7 @@ class WindowsPackageTest(unittest.TestCase):
             directory.mkdir()
         (self.build / "DW5E.exe").write_bytes(b"MZsynthetic setup")
         (self.build / "DW5E-bootstrap.exe").write_bytes(b"MZsynthetic bootstrap")
+        (self.build / "dw5e-uninstall.exe").write_bytes(b"MZsynthetic uninstall helper")
         (self.repo / "LICENSE").write_text("synthetic license")
         (self.repo / "rexglue-sdk").mkdir()
         (self.repo / "rexglue-sdk/LICENSE").write_text("synthetic SDK license")
@@ -95,6 +96,8 @@ class WindowsPackageTest(unittest.TestCase):
             self.assertEqual(directories, {"dw5e-data"})
             self.assertEqual(contents.read(prefix + "DW5E.exe"), b"MZsynthetic bootstrap")
             self.assertEqual(contents.read(prefix + "dw5e-data/launcher/DW5E.exe"), b"MZsynthetic setup")
+            self.assertEqual(contents.read(prefix + "dw5e-data/launcher/dw5e-uninstall.exe"),
+                             b"MZsynthetic uninstall helper")
             self.assertFalse(any("user-data/" in name or name.endswith("/install.json") for name in names))
 
     def test_relwithdebinfo_compiler_is_bundled_under_canonical_name(self):

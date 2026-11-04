@@ -363,7 +363,8 @@ def windows(build, recomp_build, test):
              ', '.join(str(p) for p in win_candidates))
 
     bootstrap = build / 'DW5E-bootstrap.exe'
-    for p in (launcher, bootstrap, LLVM_MINGW_WIN_ZIP, CMAKE_WIN_ZIP, NINJA_WIN_ZIP):
+    uninstall = build / 'dw5e-uninstall.exe'
+    for p in (launcher, bootstrap, uninstall, LLVM_MINGW_WIN_ZIP, CMAKE_WIN_ZIP, NINJA_WIN_ZIP):
         if not p.exists():
             fail(f'required build artifact or tool missing: {p}')
 
@@ -379,9 +380,12 @@ def windows(build, recomp_build, test):
     (payload / 'launcher').mkdir(parents=True)
     shutil.copy2(bootstrap, stage / 'DW5E.exe')
     shutil.copy2(launcher, payload / 'launcher/DW5E.exe')
+    shutil.copy2(uninstall, payload / 'launcher/dw5e-uninstall.exe')
     host_dlls = [recompiler.parent, build, LLVM_MINGW_HOST / 'x86_64-w64-mingw32/bin', LLVM_MINGW_HOST / 'bin']
     if dll_closure(bootstrap, host_dlls):
         fail('Windows bootstrap must depend only on system DLLs')
+    if dll_closure(uninstall, host_dlls):
+        fail('Windows uninstall helper must depend only on system DLLs')
     for dll in dll_closure(launcher, host_dlls):
         shutil.copy2(dll, payload / 'launcher' / dll.name)
     (payload / 'BUILD_ID').write_text(version + '\n')
@@ -411,6 +415,11 @@ def windows(build, recomp_build, test):
     shutil.copy2(REPO / 'LICENSE', lic / 'dw5e (GPL-3.0).txt')
     shutil.copy2(REPO / 'rexglue-sdk/LICENSE', lic / 'rexglue-sdk (BSD-3-Clause).txt')
 
+    (payload / 'package-files.txt').write_text(
+        ''.join(f'{path.relative_to(payload).as_posix()}\n'
+                for path in sorted(payload.rglob('*')) if path.is_file()),
+        encoding='utf-8',
+    )
     validate_package(stage, windows=True)
     scan(stage, windows=True)
     archive = dist / f'{name}.zip'
@@ -494,7 +503,8 @@ def linux(build, recomp_build, sdk, appimage_tools, test):
         fail('required ReXGlue recompiler missing; searched: ' +
              ', '.join(str(p) for p in recompiler_candidates))
 
-    for p in (launcher, sdk / 'bin/clang++', appimage_tools / 'linuxdeploy-x86_64.AppImage', appimage_tools / 'appimagetool-x86_64.AppImage'):
+    uninstall = build / 'dw5e-uninstall'
+    for p in (launcher, uninstall, sdk / 'bin/clang++', appimage_tools / 'linuxdeploy-x86_64.AppImage', appimage_tools / 'appimagetool-x86_64.AppImage'):
         if not p.exists():
             fail(f'required build artifact or tool missing: {p}')
 
@@ -516,6 +526,7 @@ def linux(build, recomp_build, sdk, appimage_tools, test):
 
     shutil.copy2(launcher, stage / 'DW5E')
     shutil.copy2(launcher, stage / 'usr/bin/dw5e_setup')
+    shutil.copy2(uninstall, stage / 'usr/bin/dw5e-uninstall')
     if recompiler and recompiler.exists():
         shutil.copy2(recompiler, stage / 'usr/bin/rexglue')
         (stage / 'usr/bin/rexglue').chmod(0o755)
