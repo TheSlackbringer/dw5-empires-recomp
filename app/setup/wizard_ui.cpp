@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -294,10 +295,15 @@ bool runWizardWindow(WizardConfig &config)
         auto path = page == Page::Disc && !installDestination
             ? std::string{} : pathText(installDestination ? visibleInstallFolder(destination.destination)
                                                            : destination.destination);
+        if (installDestination && !destination.explicitOverride) {
 #ifdef _WIN32
-        if (installDestination && !destination.explicitOverride)
             path = R"(C:\Games\DW5E-Recomp)";
+#else
+            const char *home = std::getenv("HOME");
+            const auto homeFolder = home ? pathFromText(home) : fs::path{};
+            path = homeFolder.is_absolute() ? pathText(homeFolder / "Games/DW5E-Recomp") : std::string{};
 #endif
+        }
         std::snprintf(folderInput, sizeof(folderInput), "%s", path.c_str());
         returnFromOptions = page;
         page = Page::Other;

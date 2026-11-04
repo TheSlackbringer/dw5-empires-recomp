@@ -120,7 +120,7 @@ Play
   4. Later starts open the game directly without rebuilding.
 
 Your files
-  Setup creates DW5E-Recomp beside the download. Use Choose folder to pick another parent.
+  The first-install wizard suggests ~/Games/DW5E-Recomp. Use Choose folder to pick another parent.
   Open DW5E.AppImage inside the installed folder. It includes its own README and
   dw5e-data folder outside the temporary AppImage mount.
   dw5e-data contains extracted game data, build, generated code, cache, logs and the
